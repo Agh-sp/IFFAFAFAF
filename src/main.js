@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import {
+  TILE, COLS, ROWS, HW, HH, GRID, FLOOR, WALL,
+  ROOMS, cellCenter, cellX, cellZ, world, isWall, cellOf, roomAt, FURNITURE, PLAN,
+} from './map.js';
 
 /* =====================================================================
    نبرد شرکت  |  تیم سوات  vs  تیم تروریست
@@ -8,9 +12,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
    نور اضطراری. همه مدل‌ها GLB از پک‌های Quaternius (CC0).
    ===================================================================== */
 
-const TILE = 2;                 // هر خانه نقشه = ۲ متر
-const COLS = 30, ROWS = 22;
-const HW = COLS * TILE / 2, HH = ROWS * TILE / 2;
+
 const IS_TOUCH = 'ontouchstart' in window;
 const FLOOR_Y = 0.09;   // ارتفاع سطح کاشی کف
 
@@ -199,7 +201,11 @@ async function loadCharacter(key, target = 1.8) {
 
   const mixer = new THREE.AnimationMixer(root);
   const actions = {};
-  for (const clip of src.clips) actions[clip.name] = mixer.clipAction(clip);
+  for (const clip of src.clips) {
+    // ⚠️ TPose/sad_pose حالت مرجع هستند؛ اگر پخش شوند کاراکتر «عروسکی» می‌شود
+    if (/tpose|t_pose|sad_pose|bind/i.test(clip.name)) continue;
+    actions[clip.name] = mixer.clipAction(clip);
+  }
   root.userData.mixer = mixer;
   root.userData.actions = actions;
   root.userData.current = null;
@@ -229,55 +235,44 @@ function ensureIdle(obj) {
   const list = Object.values(acts);
   if (!list.length) return;
   if (!list.some(a => a.isRunning())) {
-    const first = list.find(a => /idle/i.test(a.getClip().name)) || list[0];
+    const safe = list.filter(a => !/tpose|t_pose|sad_pose|bind/i.test(a.getClip().name));
+    if (!safe.length) return;
+    const first = safe.find(a => /idle/i.test(a.getClip().name)) || safe[0];
     first.reset().play();
     obj.userData.current = first.getClip().name;
   }
 }
 
+// پخش انیمیشن با محافظت در برابر باگ‌های رایج:
+//  - کلیپ مرجع (TPose) هرگز پخش نمی‌شود
+//  - کلیپ از پایان/میانه شروع نمی‌شود (همیشه reset)
+//  - loop درست تنظیم می‌شود تا انیمیشن وسط کار گیر نکند
 function playAnim(obj, keys, fade = 0.18, once = false) {
   const acts = obj?.userData?.actions;
   if (!acts) return;
+  const names = Object.keys(acts);
   const clips = Object.values(acts).map(a => a.getClip());
   const clip = findClip(clips, keys);
   if (!clip || obj.userData.current === clip.name) return;
   const prev = acts[obj.userData.current], next = acts[clip.name];
   if (!next) return;
-  next.reset().setEffectiveWeight(1).fadeIn(fade).play();
-  if (once) { next.setLoop(THREE.LoopOnce, 1); next.clampWhenFinished = true; }
-  if (prev) prev.fadeOut(fade);
+
+  next.reset();
+  next.setEffectiveTimeScale(1);
+  next.setEffectiveWeight(1);
+  next.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity);
+  next.clampWhenFinished = once;
+  next.fadeIn(fade).play();
+
+  if (prev && prev !== next) prev.fadeOut(fade);
   obj.userData.current = clip.name;
 }
 
-/* --------------------------- نقشه شرکت --------------------------- */
-const grid = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
-const F = 0, W = 1;
-const world = (c, r) => ({ x: -HW + TILE * (c + 0.5), z: -HH + TILE * (r + 0.5) });
-
-(function design() {
-  for (let c = 0; c < COLS; c++) { grid[0][c] = W; grid[ROWS - 1][c] = W; }
-  for (let r = 0; r < ROWS; r++) { grid[r][0] = W; grid[r][COLS - 1] = W; }
-
-  const row = (r, c0, c1, gaps = []) => { for (let c = c0; c <= c1; c++) if (!gaps.includes(c)) grid[r][c] = W; };
-  const col = (c, r0, r1, gaps = []) => { for (let r = r0; r <= r1; r++) if (!gaps.includes(r)) grid[r][c] = W; };
-
-  // راهروی افقی (ردیف ۱۰) و راهروی عمودی (ستون ۱۴) — همیشه باز
-  grid[10].fill(F);
-  for (let r = 1; r < ROWS - 1; r++) grid[r][14] = F;
-
-  // ---- طبقه بالا: اتاق مدیریت / اتاق جلسات / اتاق سرور ----
-  col(8, 1, 9, [5]);
-  col(21, 1, 9, [5]);
-  row(9, 1, COLS - 2, [4, 14, 25]);
-  // رک سرور به‌عنوان مانع داخل اتاق راست
-  for (let r = 4; r <= 6; r++) for (let c = 25; c <= 27; c++) grid[r][c] = W;
-
-  // ---- طبقه پایین: آزمایشگاه / امنیت / بایگانی ----
-  col(7, 11, ROWS - 2, [16]);
-  col(17, 11, ROWS - 2, [13]);
-  col(23, 11, ROWS - 2, [18]);
-  row(11, 1, COLS - 2, [3, 11, 20, 26]);
-})();
+/* --------------------------- نقشه ساختمان ---------------------------
+   نقشه در src/map.js تعریف شده تا تست‌ها و بازی از یک منبع بخوانند. */
+const grid = GRID;
+const F = FLOOR, W = WALL;
+const roomAtWorld = roomAt;
 
 const WALL_SEGS = [];
 const PROP_COLLIDERS = [];
@@ -329,6 +324,124 @@ const gridAt = (x, z) => {
   if (r < 0 || c < 0 || r >= ROWS || c >= COLS) return W;
   return grid[r][c];
 };
+/* ---------------------- مسیریابی (A*) ----------------------
+   مشکل قبلی: بات‌ها فقط مستقیم به سمت هدف می‌رفتند، به دیوار می‌خوردند و
+   دور خودشان می‌چرخیدند. حالا روی گرید کف مسیر واقعی حساب می‌شود. */
+const NAV = {
+  w: COLS, h: ROWS,
+  // خانه‌ای که مبلمان سنگین در آن است، برای مسیریابی بسته حساب می‌شود؛
+  // وگرنه بات مستقیم به میز می‌خورد و گیر می‌کند.
+  blocked: null,          // Set از "c,r" — پس از ساخت مبلمان پر می‌شود
+  open(c, r) {
+    if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return false;
+    if (grid[r][c] === W) return false;
+    if (this.blocked && this.blocked.has(`${c},${r}`)) return false;
+    return true;
+  },
+  key(c, r) { return r * COLS + c; },
+};
+
+// پس از ساخت مبلمان، خانه‌های اشغال‌شده را برای مسیریابی علامت بزن
+function buildNavBlockers() {
+  const set = new Set();
+  for (const c of PROP_COLLIDERS) {
+    // ⚠️ فقط خودِ خانه‌ی مبلمان را ببند، نه ۳×۳ اطرافش.
+    // با شعاع بزرگ‌تر، اتاق‌های کوچک کاملاً مسدود می‌شدند و بات داخل
+    // اتاقش زندانی می‌شد (همان باگ «بات‌ها تکون نمی‌خورن»).
+    // همه‌ی وسایلی که بات واقعاً به آن‌ها برخورد می‌کند باید بسته باشند،
+    // حتی صندلی‌های کوچک؛ وگرنه مسیر از رویشان رد می‌شود و بات گیر می‌کند.
+    if (c.r < 0.05) continue;
+    const cc = Math.floor((c.x + HW) / TILE), rr = Math.floor((c.z + HH) / TILE);
+    if (cc < 1 || rr < 1 || cc >= COLS - 1 || rr >= ROWS - 1) continue;
+    if (grid[rr][cc] !== W) set.add(`${cc},${rr}`);
+  }
+  // راهروها هرگز بسته نشوند (تضمین اتصال)
+  for (const r of [8, 9, 17, 18]) for (let c = 1; c < COLS - 1; c++) set.delete(`${c},${r}`);
+  for (const c of [16, 17]) for (let r = 1; r < ROWS - 1; r++) set.delete(`${c},${r}`);
+  NAV.blocked = set;
+}
+
+// لیست همسایه‌ها با ۸ جهت (قطرها گران‌تر)
+const DIRS8 = [[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,1.414],[1,-1,1.414],[-1,1,1.414],[-1,-1,1.414]];
+
+function findPath(sx, sz, tx, tz) {
+  const sc = Math.floor((sx + HW) / TILE), sr = Math.floor((sz + HH) / TILE);
+  const tc = Math.floor((tx + HW) / TILE), tr = Math.floor((tz + HH) / TILE);
+  if (!NAV.open(tc, tr)) return null;
+  if (sc === tc && sr === tr) return [{ x: tx, z: tz }];
+
+  const start = NAV.key(sc, sr), goal = NAV.key(tc, tr);
+  const openSet = new Map();     // key → {c,r,g,f,parent}
+  const closed = new Set();
+  const h = (c, r) => Math.hypot(c - tc, r - tr);
+  openSet.set(start, { c: sc, r: sr, g: 0, f: h(sc, sr), parent: null });
+
+  let guard = 0;
+  while (openSet.size && guard++ < 4000) {
+    // کمترین f
+    let bestK = null, bestF = Infinity;
+    for (const [k, n] of openSet) if (n.f < bestF) { bestF = n.f; bestK = k; }
+    const cur = openSet.get(bestK);
+    if (bestK === goal) {
+      // بازسازی مسیر
+      const out = [];
+      for (let n = cur; n; n = n.parent) out.push(world(n.c, n.r));
+      out.reverse();
+      out[out.length - 1] = { x: tx, z: tz };
+      // حذف نقاط هم‌راستا برای نرم‌تر شدن حرکت
+      const simp = [out[0]];
+      for (let i = 1; i < out.length - 1; i++) {
+        const a = simp[simp.length - 1], b = out[i], c2 = out[i + 1];
+        const cross = (b.x - a.x) * (c2.z - a.z) - (b.z - a.z) * (c2.x - a.x);
+        if (Math.abs(cross) > 0.35) simp.push(b);
+      }
+      simp.push(out[out.length - 1]);
+      return simp;
+    }
+    openSet.delete(bestK);
+    closed.add(bestK);
+    for (const [dc, dr, cost] of DIRS8) {
+      const nc = cur.c + dc, nr = cur.r + dr;
+      if (!NAV.open(nc, nr)) continue;
+      // قطرها نباید از گوشه دیوار رد شوند
+      if (dc && dr && (!NAV.open(cur.c + dc, cur.r) || !NAV.open(cur.c, cur.r + dr))) continue;
+      const nk = NAV.key(nc, nr);
+      if (closed.has(nk)) continue;
+      const g2 = cur.g + cost;
+      const ex = openSet.get(nk);
+      if (!ex || g2 < ex.g) {
+        openSet.set(nk, { c: nc, r: nr, g: g2, f: g2 + h(nc, nr), parent: cur });
+      }
+    }
+  }
+  return null;
+}
+
+// مسیر تنبل: هر چند ثانیه دوباره حساب می‌شود
+function setActorPath(a, tx, tz) {
+  const now = performance.now();
+  if (a.path && a.pathTarget && Math.hypot(a.pathTarget.x - tx, a.pathTarget.z - tz) < 1.5 && now - a.pathAt < 900) return;
+  a.pathTarget = { x: tx, z: tz };
+  a.pathAt = now;
+  a.path = findPath(a.g.position.x, a.g.position.z, tx, tz);
+  a.pathI = 0;
+  a.stuck = 0;
+}
+
+// حرکت‌دادن بات روی مسیر؛ خروجی: آیا واقعاً حرکت کرد
+function followPath(a, speed, dt) {
+  if (!a.path || a.pathI >= a.path.length) return false;
+  const p = a.path[a.pathI];
+  const dx = p.x - a.g.position.x, dz = p.z - a.g.position.z;
+  const d = Math.hypot(dx, dz);
+  if (d < 0.45) { a.pathI++; return true; }
+  const step = Math.min(speed * dt, d);
+  a.g.position.x += (dx / d) * step;
+  a.g.position.z += (dz / d) * step;
+  a.g.rotation.y = Math.atan2(dx, dz);
+  return true;
+}
+
 function hasLineOfSight(from, to) {
   const dx = to.x - from.x, dz = to.z - from.z;
   const dist = Math.hypot(dx, dz);
@@ -368,11 +481,6 @@ function normalizedGeometry(gltf, target, mode = 'footprint') {
 
 function instancedFrom(gltf, placements, target, mode = 'footprint', opts = {}) {
   const { geo, mat } = normalizedGeometry(gltf, target, mode);
-  if (opts.transparent) {
-    mat.transparent = true;
-    mat.opacity = 0.72;
-    mat.depthWrite = false;
-  }
   const im = new THREE.InstancedMesh(geo, mat, placements.length);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1);
   placements.forEach((p, i) => {
@@ -407,98 +515,30 @@ async function buildShell() {
   instancedFrom(fA, floorA, TILE);
   instancedFrom(fB, floorB, TILE);
   // دیوارها با ارتفاع کنترل‌شده ساخته می‌شوند تا دوربین از بالا دید کامل داشته باشد
-  const wallA2 = instancedFrom(wA, wallA, TILE, 'footprint', { transparent: true });
-  const wallB2 = instancedFrom(wB, wallB, TILE, 'footprint', { transparent: true });
-  const wallT2 = instancedFrom(wT, wallTall, TILE, 'footprint', { transparent: true });
-  for (const im of [wallA2, wallB2, wallT2]) {
-    const bb = im.geometry.boundingBox;
-    if (!bb) im.geometry.computeBoundingBox();
+  // ⚠️ دیوارها نیمه‌شفاف نمی‌شوند: با depthWrite=false ترتیب رسم تصادفی
+  // می‌شود و دیوارها از داخل هم دیده می‌شوند (همان «باگ نامرئی‌شدن»).
+  // به‌جایش دیوارها کامل مات‌اند و فقط ارتفاعشان محدود است تا دوربین از بالا ببیند.
+  const walls = [
+    instancedFrom(wA, wallA, TILE, 'footprint'),
+    instancedFrom(wB, wallB, TILE, 'footprint'),
+    instancedFrom(wT, wallTall, TILE, 'footprint'),
+  ];
+  for (const im of walls) {
+    im.geometry.computeBoundingBox();
     const h = im.geometry.boundingBox.max.y;
-    // ارتفاع دیوار از ۲.۲ متر بیشتر نشود
-    if (h > 2.2) { im.scale.y = 2.2 / h; im.updateMatrix?.(); }
+    if (h > 2.0) { im.scale.y = 2.0 / h; im.updateMatrix?.(); }
+    im.material.depthWrite = true;
+    im.material.transparent = false;
+    im.material.opacity = 1;
+    im.material.needsUpdate = true;
   }
 }
 
 /* -------------------------- مبلمان شرکت -------------------------- */
 // flat = روی زمین (فرش/کابل)، ceiling = آویزان از سقف
-const FURNITURE = [
-  // دفتر مدیریت (بالا-چپ)
-  { n: 'Couch_Large1', x: -23, z: -16, r: 0, s: 2.6, mode: 'footprint' },
-  { n: 'TV_1', x: -23, z: -19.3, r: 0, s: 2.4, mode: 'footprint', onWall: true },
-  { n: 'Table_RoundLarge', x: -23, z: -12.6, r: 0, s: 2.4, mode: 'footprint' },
-  { n: 'Chair_1', x: -24.4, z: -11.8, r: 0.6, s: 0.95 },
-  { n: 'Chair_3', x: -21.6, z: -11.8, r: -0.6, s: 0.95 },
-  { n: 'Bookshelf', x: -27.4, z: -14, r: Math.PI / 2, s: 2.3 },
-  { n: 'Houseplant_1', x: -26.6, z: -18, r: 0, s: 1.3 },
-  { n: 'Carpet_1', x: -23, z: -14.6, r: 0, s: 3.6, mode: 'footprint', flat: true },
-  { n: 'Computer', x: -23, z: -12.6, r: 0.4, s: 0.9 },
-  { n: 'Drawer_1', x: -27.2, z: -10.6, r: Math.PI / 2, s: 1.0 },
-  // اتاق جلسات (بالا-وسط)
-  { n: 'Table_RoundLarge', x: 0, z: -16, r: Math.PI / 2, s: 3.4, mode: 'footprint' },
-  { n: 'Chair_2', x: -2.4, z: -16.8, r: 1.2, s: 0.95 },
-  { n: 'Chair_2', x: 2.4, z: -16.8, r: -1.2, s: 0.95 },
-  { n: 'Chair_4', x: -2.4, z: -15.2, r: 1.8, s: 0.95 },
-  { n: 'Chair_4', x: 2.4, z: -15.2, r: -1.8, s: 0.95 },
-  { n: 'Computer_Large', x: 0, z: -19.2, r: 0, s: 2.0 },
-  { n: 'Collectible_Board', x: 0, z: -19.3, r: 0, s: 2.8, mode: 'footprint', onWall: true, wallOffset: 0.6 },
-  { n: 'Houseplant_3', x: -7.4, z: -15, r: 0, s: 1.3 },
-  { n: 'Houseplant_5', x: 7.4, z: -15, r: 0, s: 1.3 },
-  // اتاق سرور (بالا-راست)
-  { n: 'Props_Shelf_Tall', x: 20.5, z: -17, r: 0, s: 2.5 },
-  { n: 'Props_Shelf_Tall', x: 23.2, z: -17, r: 0, s: 2.5 },
-  { n: 'Props_Vessel_Tall', x: 20.4, z: -12.4, r: 0, s: 2.4 },
-  { n: 'Props_Computer', x: 24.6, z: -12.4, r: -0.5, s: 1.1 },
-  { n: 'Props_Crate', x: 17.5, z: -12.4, r: 0.3, s: 1.3 },
-  { n: 'Props_Pod', x: 26.4, z: -19.4, r: 0, s: 2.0 },
-  { n: 'Cable_Long', x: 23, z: -9.8, r: 0, s: 3.4, mode: 'length', flat: true },
-  { n: 'Props_ContainerFull', x: 27.6, z: -15, r: 0, s: 2.0 },
-  // فضای باز کارمندان (وسط)
-  { n: 'Computer_Large', x: -8, z: 2.4, r: 0, s: 1.8 },
-  { n: 'Computer_Large', x: -4.4, z: 2.4, r: 0, s: 1.8 },
-  { n: 'Computer_Large', x: -0.8, z: 2.4, r: 0, s: 1.8 },
-  { n: 'Computer_Large', x: 2.8, z: 2.4, r: 0, s: 1.8 },
-  { n: 'Chair_1', x: -8, z: 0.6, r: Math.PI, s: 0.95 },
-  { n: 'Chair_1', x: -4.4, z: 0.6, r: Math.PI, s: 0.95 },
-  { n: 'Chair_1', x: -0.8, z: 0.6, r: Math.PI, s: 0.95 },
-  { n: 'Chair_1', x: 2.8, z: 0.6, r: Math.PI, s: 0.95 },
-  { n: 'Shelf_Large', x: 9.4, z: 3.6, r: 0, s: 2.4 },
-  { n: 'Couch_Medium1', x: -8, z: 7.4, r: Math.PI, s: 2.2, mode: 'footprint' },
-  { n: 'Carpet_2', x: -5, z: 6, r: 0, s: 4.0, mode: 'footprint', flat: true },
-  // آزمایشگاه (پایین-چپ)
-  { n: 'Props_Teleporter_1', x: -22, z: 16, r: 0, s: 2.8 },
-  { n: 'Props_Capsule', x: -26.4, z: 16, r: 0, s: 2.2 },
-  { n: 'Props_ComputerSmall', x: -18.6, z: 18.6, r: 1.1, s: 0.95 },
-  { n: 'Props_Vessel', x: -25.4, z: 20, r: 0, s: 1.2 },
-  { n: 'Props_Laser', x: -19.2, z: 13.6, r: 0, s: 2.0 },
-  // اتاق امنیت (پایین-وسط)
-  { n: 'Computer_Large', x: 0, z: 17, r: 0, s: 2.2 },
-  { n: 'Chair_2', x: 0, z: 19.4, r: Math.PI, s: 0.95 },
-  { n: 'Props_Chest', x: 3.4, z: 19.6, r: 0.4, s: 0.95 },
-  { n: 'TV_2', x: -3.6, z: 19.8, r: 0, s: 2.0, onWall: true },
-  // بایگانی (پایین-راست)
-  { n: 'Bookshelf', x: 20, z: 19, r: Math.PI, s: 2.3 },
-  { n: 'Bookshelf', x: 22.8, z: 19, r: Math.PI, s: 2.3 },
-  { n: 'Shelf_2', x: 26.4, z: 16, r: Math.PI / 2, s: 2.1 },
-  { n: 'Props_CrateLong', x: 25.4, z: 20.4, r: 0, s: 2.2, mode: 'footprint' },
-  { n: 'Trashcan_Green', x: 19, z: 14.6, r: 0, s: 1.1 },
-  { n: 'Props_Shelf', x: 27.4, z: 13.6, r: -Math.PI / 2, s: 2.0 },
-  // راهروها
-  { n: 'Kitchen_Fridge', x: -29.4, z: 0.4, r: Math.PI / 2, s: 2.1 },
-  { n: 'Kitchen_Cabinet1', x: -29.4, z: 4.4, r: Math.PI / 2, s: 2.0 },
-  { n: 'Kitchen_Oven', x: 29.4, z: -3.6, r: -Math.PI / 2, s: 2.0 },
-  { n: 'Props_ContainerFull', x: 29.4, z: 2.4, r: -Math.PI / 2, s: 2.1 },
-  { n: 'Trashcan_Cylindric', x: -14, z: -7.4, r: 0, s: 1.1 },
-  { n: 'Houseplant_1', x: 11, z: -6.4, r: 0, s: 1.3 },
-  { n: 'Houseplant_3', x: -11, z: 8.4, r: 0, s: 1.3 },
-  { n: 'Houseplant_5', x: 16, z: 8.4, r: 0, s: 1.3 },
-  { n: 'Light_Ceiling1', x: -18, z: -14, r: 0, s: 1.0, ceiling: 4.0 },
-  { n: 'Light_Ceiling1', x: 0, z: -13, r: 0, s: 1.0, ceiling: 4.0 },
-  { n: 'Light_Ceiling1', x: 18, z: -13, r: 0, s: 1.0, ceiling: 4.0 },
-  { n: 'Light_Ceiling1', x: -18, z: 16, r: 0, s: 1.0, ceiling: 4.0 },
-  { n: 'Light_Ceiling1', x: 0, z: 16, r: 0, s: 1.0, ceiling: 4.0 },
-  { n: 'Light_Ceiling1', x: 18, z: 16, r: 0, s: 1.0, ceiling: 4.0 },
-  { n: 'Light_Ceiling1', x: 0, z: 0, r: 0, s: 1.0, ceiling: 4.0 },
-];
+// مبلمان: هر اتاق چند قطعه، همه رو به مرکز اتاق، روی کف و دور از درها.
+// مختصات بر اساس ROOMS (ردیف/ستون) محاسبه شده تا با نقشه هم‌تراز باشد.
+// مبلمان از src/map.js می‌آید (هم‌تراز با اتاق‌ها)
 
 async function buildFurniture() {
   await Promise.all(FURNITURE.map(async f => {
@@ -1017,93 +1057,97 @@ function startReload(quick = false) {
   playReload();
 }
 
+/* ------------------------------ هوش دشمن ------------------------------
+   باگ قبلی: وقتی بات هدف نداشت، هر فریم wanderDir عوض می‌شد و بات سر جایش
+   می‌چرخید. حالا:
+   ۱) حتی در تاریکی روی مسیر A* راه می‌رود و هر ۲-۴ ثانیه مقصد تازه می‌گیرد
+   ۲) انیمیشن راه‌رفتن فقط وقتی پخش می‌شود که واقعاً جابه‌جا شود
+   ۳) اگر گیر کرد، مسیر دوباره حساب می‌شود و مقصد عوض می‌شود
+*/
 function updateAI(a, dt) {
   if (!a.alive) return;
   a.fireCd -= dt;
   a.repath -= dt;
+  if (a.pathCd === undefined) a.pathCd = 0;
+  a.pathCd -= dt;
 
-  if (a.repath <= 0) {
-    a.repath = 0.35;
-    let best = null, bestD = Infinity, visible = null, visD = Infinity;
-    for (const e of actors) {
-      if (!e.alive || e.team === a.team) continue;
-      const d = flatDist(a.g.position, e.g.position);
-      if (d < bestD) { bestD = d; best = e; }
-      // دید در تاریکی: یا خودم با چراغ‌قوه او را روشن کرده‌ام،
-      // یا او چراغ‌قوه‌اش روشن است و مرا روشن می‌کند،
-      // یا در فاصله‌ی خیلی نزدیک (شنیدن صدای نفس!) هستیم.
-      const spotted = hasLineOfSight(a.g.position, e.g.position) &&
-        (litByAi(a, e.g.position) || (e.isPlayer && litByPlayer(a.g.position)) || d < 2.6);
-      if (d < visD && spotted) { visD = d; visible = e; }
-    }
-    // اگر کسی دیده نشود، تنها جهت تقریبی آخرین هدف را نگه می‌داریم
-    a.target = visible || null;
-    a.lastKnown = best || null;
+  // ---- انتخاب هدف دیداری (فقط چیزی که در نور یا خیلی نزدیک باشد) ----
+  let visible = null, visD = Infinity, nearest = null, nearD = Infinity;
+  for (const e of actors) {
+    if (!e.alive || e.team === a.team) continue;
+    const d = flatDist(a.g.position, e.g.position);
+    if (d < nearD) { nearD = d; nearest = e; }
+    if (d > 26) continue;
+    const spotted = hasLineOfSight(a.g.position, e.g.position) &&
+      (litByAi(a, e.g.position) || (e.isPlayer && litByPlayer(a.g.position)) || d < 3.2);
+    if (spotted && d < visD) { visD = d; visible = e; }
   }
+  a.target = visible;
+  a.lastKnown = nearest;
+  a.visible = !!visible;
+
+  const want = a.role === 'تک‌تیرانداز' ? 15 : a.role === 'پشتیبان' ? 9 : 6;
+
   if (!a.target) {
-    // در تاریکی سرگردان می‌شود (بدون دید واقعی)
-    playAnim(a.model, ['Idle', 'idle', 'Standing'], 0.2);
-    if (a.wanderCd === undefined) a.wanderCd = rand(0.5, 2);
-    a.wanderCd -= dt;
-    if (a.wanderCd <= 0) {
-      a.wanderCd = rand(2.5, 5);
-      a.wanderDir = rand(-Math.PI, Math.PI);
+    // ---- سرگردانی با مسیر واقعی: به اتاق/راهروی تصادفی برو ----
+    if (a.pathCd <= 0 || !a.path || a.pathI >= a.path.length) {
+      a.pathCd = rand(2.5, 4.5);
+      const goal = pickWanderGoal(a);
+      if (goal) setActorPath(a, goal.x, goal.z);
     }
-    if (a.wanderDir !== undefined) {
-      const step = a.speed * 0.45 * dt;
-      a.g.position.x += Math.sin(a.wanderDir) * step;
-      a.g.position.z += Math.cos(a.wanderDir) * step;
-      a.g.rotation.y = a.wanderDir;
+    const moved = followPath(a, a.speed * 0.55, dt);
+    if (moved) {
+      // اگر جلوی بات بسته بود، مقصد تازه بگیر
       const before = a.g.position.clone();
       resolveCollision(a.g.position, 0.55);
-      if (a.g.position.distanceTo(before) < step * 0.3) a.wanderDir = rand(-Math.PI, Math.PI);
-      playAnim(a.model, ['Walk', 'walk', 'Walking'], 0.2);
+      if (a.g.position.distanceTo(before) > 0.02) { a.path = null; a.pathCd = 0; }
+      playAnim(a.model, ['Walk', 'walk', 'Walking'], 0.18);
+    } else {
+      playAnim(a.model, ['Idle', 'idle', 'Standing'], 0.2);
+      a.path = null;
     }
     return;
   }
 
+  // ---- هدف دیده شد: نزدیک شو یا در فاصله مناسب بایست ----
   const t = a.target.g.position;
   const d = flatDist(a.g.position, t);
-  a.g.rotation.y = Math.atan2(t.x - a.g.position.x, t.z - a.g.position.z);
 
-  const seen = true;   // target فقط وقتی ست می‌شود که دیده شده باشد
-  // در تاریکی مطلق اگر هدف چراغ‌قوه‌اش را خاموش کند، دیگر دیده نمی‌شود
-  a.spotTimer = (a.spotTimer || 0) - dt;
-  const want = a.role === 'تک‌تیرانداز' ? 15 : a.role === 'پشتیبان' ? 9 : 6;
-  let moving = false;
-  if (!seen || d > want) {
-    const strafe = Math.sin(performance.now() * 0.0011 + a.seed) * 0.7;
-    const ang = a.g.rotation.y + strafe;
-    const step = Math.min(a.speed * dt, Math.max(0, d - want + 0.5));
+  if (d > want * 1.1) {
+    if (a.pathCd <= 0 || !a.path) { a.pathCd = 0.4; setActorPath(a, t.x, t.z); }
+    const moved = followPath(a, a.speed, dt);
     const before = a.g.position.clone();
-    a.g.position.x += Math.sin(ang) * step;
-    a.g.position.z += Math.cos(ang) * step;
     resolveCollision(a.g.position, 0.55);
-    if (a.g.position.distanceTo(before) < step * 0.2) { // دور زدن مانع
-      a.g.position.x += Math.cos(ang) * step * 1.5;
-      a.g.position.z += -Math.sin(ang) * step * 1.5;
-      resolveCollision(a.g.position, 0.55);
+    const blocked = a.g.position.distanceTo(before) > 0.02;
+    if (blocked || !moved) { a.path = null; a.pathCd = 0; }
+    playAnim(a.model, ['Run', 'run', 'Running', 'Walk', 'walk'], 0.16);
+  } else if (d < want * 0.5) {
+    // خیلی نزدیک: عقب بکش (با مسیر، نه با چرخیدن دور خود)
+    if (a.pathCd <= 0 || !a.path) {
+      a.pathCd = 0.8;
+      const away = Math.atan2(a.g.position.x - t.x, a.g.position.z - t.z);
+      const gx = a.g.position.x + Math.sin(away) * 4;
+      const gz = a.g.position.z + Math.cos(away) * 4;
+      setActorPath(a, clamp(gx, -HW + 3, HW - 3), clamp(gz, -HH + 3, HH - 3));
     }
-    moving = true;
-  } else if (d < want * 0.55) {
-    const ang = a.g.rotation.y + Math.PI;
-    a.g.position.x += Math.sin(ang) * a.speed * 0.7 * dt;
-    a.g.position.z += Math.cos(ang) * a.speed * 0.7 * dt;
+    followPath(a, a.speed * 0.8, dt);
     resolveCollision(a.g.position, 0.55);
-    moving = true;
+    playAnim(a.model, ['Run', 'run', 'Walking', 'walk'], 0.16);
+  } else {
+    // در برد: رو به هدف بایست و شلیک کن
+    a.g.rotation.y = Math.atan2(t.x - a.g.position.x, t.z - a.g.position.z);
+    playAnim(a.model, ['Idle', 'idle'], 0.2);
   }
-  playAnim(a.model, moving ? ['Run', 'run', 'Running', 'Walk', 'walk'] : ['Idle', 'idle'], 0.16);
 
-  if (seen && d < a.range && a.fireCd <= 0) {
+  if (a.target && d < a.range && a.fireCd <= 0) {
     a.fireCd = a.fireRate * rand(0.8, 1.3);
+    a.g.rotation.y = Math.atan2(t.x - a.g.position.x, t.z - a.g.position.z);
     const origin = a.g.position.clone();
     origin.x += Math.sin(a.g.rotation.y) * 0.55;
     origin.z += Math.cos(a.g.rotation.y) * 0.55;
     origin.y = 1.2;
     const target = t.clone(); target.y = 1.15;
-    // دقت: فاصله، دود و حرکت
     let hitChance = clamp(1.1 - d / (a.range * 1.6), 0.15, 0.8);
-    if (moving) hitChance *= 0.7;
     if (inSmoke(a.g.position) || inSmoke(t)) hitChance *= 0.42;
     const miss = target.clone().add(new THREE.Vector3(rand(-2.6, 2.6), rand(-0.4, 1.6), rand(-2.6, 2.6)));
     spawnTracer(origin, Math.random() < hitChance ? target : miss, a.team, 0.05);
@@ -1112,6 +1156,20 @@ function updateAI(a, dt) {
     const ek = WEAPONS[a.def.gun]?.kind || 'rifle';
     playShot(ek === 'melee' ? 'rifle' : ek, flatDist(a.g.position, playerG.position), 0.85);
   }
+}
+
+// مقصد سرگردانی: نقطه‌ای دورتر در محدوده‌ی ۱۲ متری، روی کف
+function pickWanderGoal(a) {
+  for (let i = 0; i < 14; i++) {
+    const ang = rand(-Math.PI, Math.PI);
+    const dist = rand(5, 14);
+    const x = a.g.position.x + Math.sin(ang) * dist;
+    const z = a.g.position.z + Math.cos(ang) * dist;
+    if (x < -HW + 3 || x > HW - 3 || z < -HH + 3 || z > HH - 3) continue;
+    if (gridAt(x, z) === W) continue;
+    return { x, z };
+  }
+  return null;
 }
 
 /* --------------------------- نارنجک / دود --------------------------- */
@@ -1258,7 +1316,7 @@ renderer.domElement.addEventListener('pointerdown', () => renderer.domElement.fo
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; });
 let mouseX = innerWidth / 2, mouseY = innerHeight / 2, mouseDown = false;
 let joyVec = { x: 0, y: 0 }, joyFire = false, joyMoving = false;
-let camZoom = 23;
+let camZoom = 26;
 let camShakeX = 0;
 const camTarget0 = new THREE.Vector3();
 
@@ -1280,8 +1338,7 @@ addEventListener('keydown', e => {
   if (code === 'Digit1') equipWeapon('Shotgun');
   if (code === 'Digit2') equipWeapon('Colt');
   if (code === 'Digit3') equipWeapon('Knife');
-  if (code === 'Tab') { e.preventDefault(); toggleBoard(); }
-  if (code === 'Escape') closePanels();
+  if (code === 'Escape') document.exitPointerLock?.();
   if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(code)) e.preventDefault();
 });
 addEventListener('keyup', e => {
@@ -1297,14 +1354,13 @@ renderer.domElement.addEventListener('mousedown', e => {
 addEventListener('mouseup', () => mouseDown = false);
 addEventListener('contextmenu', e => { if (e.target === renderer.domElement) e.preventDefault(); });
 addEventListener('wheel', e => {
-  if (galleryOpen) return;
   if (e.shiftKey) {
     // Shift + چرخ = تعویض سلاح
     const i = PLAYER_LOADOUT.indexOf(player.weapon);
     const n = (i + (e.deltaY > 0 ? 1 : -1) + PLAYER_LOADOUT.length) % PLAYER_LOADOUT.length;
     equipWeapon(PLAYER_LOADOUT[n]);
   } else {
-    camZoom = clamp(camZoom + e.deltaY * 0.02, 17, 30);   // زوم محدود: دوربین از نقشه بیرون نزند
+    camZoom = clamp(camZoom + e.deltaY * 0.02, 18, 34);   // زوم محدود: دوربین از نقشه بیرون نزند
   }
 }, { passive: true });
 addEventListener('resize', () => {
@@ -1331,27 +1387,24 @@ addEventListener('touchend', e => {
 const fireBtn = document.getElementById('firebtn');
 fireBtn.addEventListener('touchstart', e => { joyFire = true; e.preventDefault(); }, { passive: false });
 fireBtn.addEventListener('touchend', () => { joyFire = false; });
-document.querySelectorAll('.slot').forEach(b => { b.onclick = () => equipWeapon(b.dataset.w); });
+document.querySelectorAll('#bar .slot').forEach(b => { b.onclick = () => equipWeapon(b.dataset.w); });
 document.getElementById('grenbtn').onclick = () => throwGrenade('grenade');
 document.getElementById('smokebtn').onclick = () => throwGrenade('smoke');
 
 /* ------------------------------ HUD ------------------------------ */
-let score = 0, roundNum = 1, galleryOpen = false;
+let score = 0, roundNum = 1;
 const faNum = n => Math.round(n).toLocaleString('fa-IR');
-const addScore = n => { score = Math.max(0, score + n); document.getElementById('score').textContent = faNum(score); };
+const addScore = n => { score = Math.max(0, score + n); };
 
 function updateHUD() {
   document.getElementById('hpfill').style.width = Math.max(0, player.hp) + '%';
-  document.getElementById('hptext').textContent = faNum(Math.max(0, player.hp));
   document.getElementById('armorfill').style.width = Math.max(0, player.armor) + '%';
-  document.getElementById('armortext').textContent = faNum(Math.max(0, player.armor));
   const w = WEAPONS[player.weapon];
   const magTxt = w.kind === 'melee' ? '∞' : faNum(player.mag);
   const capTxt = w.mag === Infinity ? '∞' : faNum(w.mag);
   document.getElementById('magtext').textContent = `${magTxt} / ${capTxt}`;
-  document.getElementById('torchstate').textContent = lightState.on ? 'روشن' : 'خاموش';
   document.getElementById('torchstate').className = lightState.on ? 'on' : 'off';
-  document.querySelectorAll('.slot').forEach(b => b.classList.toggle('active', b.dataset.w === player.weapon));
+  document.querySelectorAll('#bar .slot').forEach(b => b.classList.toggle('active', b.dataset.w === player.weapon));
   document.getElementById('wepname').textContent = WEAPONS[player.weapon].fa;
   document.getElementById('ammoG').textContent = faNum(player.ammo.grenade);
   document.getElementById('ammoS').textContent = faNum(player.ammo.smoke);
@@ -1360,19 +1413,7 @@ function updateHUD() {
 }
 
 function refreshStatics() {
-  document.getElementById('aliveS').textContent = faNum(STAT.swat.alive);
-  document.getElementById('aliveT').textContent = faNum(STAT.terror.alive);
-  const bS = document.getElementById('barS'), bT = document.getElementById('barT');
-  if (bS) bS.style.width = (STAT.swat.alive / STAT.swat.total * 100) + '%';
-  if (bT) bT.style.width = (STAT.terror.alive / STAT.terror.total * 100) + '%';
-  const kS = document.getElementById('killS'), kT = document.getElementById('killT');
-  if (kS) kS.textContent = faNum(STAT.swat.kills);
-  if (kT) kT.textContent = faNum(STAT.terror.kills);
-  const ids = {
-    sbAliveS: STAT.swat.alive, sbAliveT: STAT.terror.alive,
-    sbKillS: STAT.swat.kills, sbKillT: STAT.terror.kills,
-  };
-  for (const id in ids) { const el = document.getElementById(id); if (el) el.textContent = faNum(ids[id]); }
+  // نوار بالای صفحه حذف شده؛ آمار فقط در HUD فشرده و F3 استفاده می‌شود
 }
 
 let dmgT = null;
@@ -1393,12 +1434,11 @@ function toast(msg) {
   t.textContent = msg; t.style.display = 'block';
   clearTimeout(toastT); toastT = setTimeout(() => t.style.display = 'none', 2200);
 }
-const toggleBoard = () => document.getElementById('scoreboard').classList.toggle('open');
 
 /* --------------------------- نقشه کوچک --------------------------- */
 const mmCanvas = document.getElementById('minimap');
 const mm = mmCanvas.getContext('2d');
-mmCanvas.width = COLS * 9; mmCanvas.height = ROWS * 9;
+mmCanvas.width = COLS * 7; mmCanvas.height = ROWS * 7;
 const CW = mmCanvas.width / COLS, CH = mmCanvas.height / ROWS;
 
 function drawMinimap() {
@@ -1442,114 +1482,13 @@ function drawMinimap() {
   mm.beginPath(); mm.arc(cx, cy, 3.6, 0, 7); mm.fill();
 }
 
-/* ------------------------- گالری مدل‌ها ------------------------- */
-let gModel = null, gAz = 0.7, gPol = 0.9, gDist = 7;
-const GPOS = new THREE.Vector3(0, 0, 150);
-const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.9, 0.4, 30),
-  new THREE.MeshStandardMaterial({ color: 0x22303f, roughness: 0.7 }));
-pedestal.position.set(GPOS.x, 0.2, GPOS.z); pedestal.visible = false; scene.add(pedestal);
-const gSpot = new THREE.SpotLight(0xffffff, 120, 30, 0.55, 0.5);
-gSpot.position.set(GPOS.x + 5, 8, GPOS.z + 5);
-gSpot.visible = false; scene.add(gSpot);
-
-const GALLERY_NAMES = {
-  Shotgun_1: 'شاتگان سنگین ۱', Shotgun_2: 'شاتگان سنگین ۲', Shotgun_SawedOff: 'شاتگان کوتاه',
-  Shotgun_ShortStock: 'شاتگان دسته‌کوتاه', Revolver_1: 'هفت‌تیر ۱', Revolver_2: 'کلت هفت‌تیر',
-  Revolver_3: 'هفت‌تیر فلزی', Knife: 'چاقو', Torch: 'مشعل', AR_1: 'تفنگ AR-1', AR_3: 'تفنگ AR-3',
-  AR_5: 'تفنگ AR-5', SMG_1: 'مسلسل SMG-1', SMG_2: 'مسلسل SMG-2', Pistol_1: 'تپانچه ۱',
-  Sniper_1: 'تک‌تیرانداز ۱', Sniper_2: 'تک‌تیرانداز ۲', Grenade_1: 'نارنجک', Grenade_2: 'نارنجک دود',
-};
-const GALLERY = [
-  { cat: 'team', title: '🧍 کاراکترها (مدل + انیمیشن)', list: ['Soldier', 'Xbot'] },
-  { cat: 'weapons2', title: '🔫 اسلحه‌های بازیکن (سنگین/کلت/چاقو)', list: ['Shotgun_1', 'Shotgun_2', 'Shotgun_SawedOff', 'Shotgun_ShortStock', 'Revolver_1', 'Revolver_2', 'Revolver_3', 'Pistol_1', 'Pistol_2', 'Knife', 'Torch'] },
-  { cat: 'guns', title: '🔫 سلاح‌های تیم‌ها و نارنجک', list: ['AR_1', 'AR_3', 'AR_5', 'SMG_1', 'SMG_2', 'Pistol_1', 'Sniper_1', 'Sniper_2', 'Grenade_1', 'Grenade_2'] },
-  { cat: 'office', title: '🏢 ساختمان شرکت', list: ['FloorTile_Basic', 'Wall_1', 'Wall_4', 'DoorSingle_Wall_SideA', 'Door_Double', 'Window_Wall_SideA', 'Column_1', 'Staircase', 'RoofTile_Plate'] },
-  { cat: 'office', title: '🪑 تجهیزات و مبلمان', list: ['Couch_Large1', 'Chair_1', 'Table_RoundLarge', 'Bookshelf', 'Props_Shelf_Tall', 'Computer_Large', 'Computer', 'TV_1', 'Kitchen_Fridge', 'Props_Teleporter_1', 'Props_Capsule', 'Props_Pod', 'Props_Laser', 'Houseplant_1', 'Light_Ceiling1', 'Carpet_1'] },
-];
-
-function buildGalleryUI() {
-  const list = document.getElementById('glist');
-  for (const grp of GALLERY) {
-    const h = document.createElement('div'); h.className = 'ggroup'; h.textContent = grp.title;
-    list.appendChild(h);
-    for (const n of grp.list) {
-      const b = document.createElement('button');
-      b.className = 'gitem';
-      b.textContent = WEAPONS[n]?.fa || GALLERY_NAMES[n] || n;
-      b.onclick = () => {
-        document.querySelectorAll('.gitem').forEach(x => x.classList.remove('sel'));
-        b.classList.add('sel');
-        showInGallery(grp.cat, n);
-      };
-      list.appendChild(b);
-    }
-  }
-}
-async function showInGallery(cat, name) {
-  document.getElementById('gname').textContent = WEAPONS[name]?.fa || GALLERY_NAMES[name] || name;
-  if (gModel) { scene.remove(gModel); gModel = null; }
-  if (cat === 'team') {
-    gModel = await loadCharacter(name, 2.9);
-    const idle = findClip(Object.values(gModel.userData.actions).map(a => a.getClip()), ['Idle_Neutral', 'Idle', 'Idle_Gun_Pointing']);
-    if (idle) { gModel.userData.actions[idle.name].play(); gModel.userData.current = idle.name; }
-    gModel.position.set(GPOS.x, 0.4, GPOS.z);
-  } else if (cat === 'guns' || cat === 'weapons2') {
-    const d = WEAPONS[name];
-    gModel = await loadProp(d ? d.cat : cat, d ? d.model : name, d?.kind === 'melee' ? 2.4 : 3.2, 'length');
-    gModel.position.set(GPOS.x, 0.4, GPOS.z);
-  } else {
-    gModel = await loadProp(cat, name, 2.9, 'height');
-    gModel.position.set(GPOS.x, 0.4, GPOS.z);
-  }
-  scene.add(gModel);
-}
-function openGallery() {
-  galleryOpen = true; closeBoard();
-  document.getElementById('gallery').classList.add('open');
-  pedestal.visible = true; gSpot.visible = true;
-  showInGallery('team', 'Soldier');
-}
-function closeGallery() {
-  galleryOpen = false;
-  document.getElementById('gallery').classList.remove('open');
-  pedestal.visible = false; gSpot.visible = false;
-  if (gModel) {
-    const mx = gModel.userData?.mixer;
-    if (mx) {
-      mx.stopAllAction();
-      const i = mixers.indexOf(mx);
-      if (i >= 0) mixers.splice(i, 1);
-    }
-    scene.remove(gModel); gModel = null;
-  }
-}
-function closeBoard() { document.getElementById('scoreboard').classList.remove('open'); }
-function closePanels() { closeGallery(); closeBoard(); }
-document.getElementById('galleryBtn').onclick = openGallery;
-document.getElementById('gclose').onclick = closeGallery;
-document.getElementById('boardBtn').onclick = () => { closeGallery(); toggleBoard(); };
-document.getElementById('boardClose').onclick = toggleBoard;
 const muteBtn = document.getElementById('muteBtn');
-if (muteBtn) muteBtn.onclick = () => {
+muteBtn.onclick = () => {
   initAudio();
   audio.muted = !audio.muted;
   muteBtn.textContent = audio.muted ? '🔇' : '🔊';
   toast(audio.muted ? '🔇 صدا خاموش' : '🔊 صدا روشن');
 };
-
-let gDrag = false, gLast = { x: 0, y: 0 };
-renderer.domElement.addEventListener('pointerdown', e => {
-  if (galleryOpen) { gDrag = true; gLast = { x: e.clientX, y: e.clientY }; }
-});
-addEventListener('pointermove', e => {
-  if (gDrag && galleryOpen) {
-    gAz += (e.clientX - gLast.x) * 0.01;
-    gPol = clamp(gPol - (e.clientY - gLast.y) * 0.01, 0.12, 1.5);
-    gLast = { x: e.clientX, y: e.clientY };
-  }
-});
-addEventListener('pointerup', () => gDrag = false);
-addEventListener('wheel', e => { if (galleryOpen) gDist = clamp(gDist + e.deltaY * 0.012, 3.5, 18); }, { passive: true });
 
 /* ============================ صدا ============================ */
 // صداهای واقعی ضبط‌شده (CC0) — از پک firearm_sfx:
@@ -1756,9 +1695,10 @@ function snapToFree(x, z, used) {
 
 // اسپاون‌ها: با جست‌وجوی برنامه‌ای در نقاط خالیِ هر اتاق انتخاب شده‌اند
 // (دور از دیوار و دور از برخورد مبلمان — با scripts/test-spawn.mjs تست می‌شود)
+// سوات از سمت چپ/پایین، تروریست‌ها از سمت راست/بالا وارد می‌شوند
 const SPAWN_ANCHORS = {
-  swat: [{ x: -19, z: 3 }, { x: -20, z: -1 }, { x: -21, z: 5 }, { x: -18, z: 6 }, { x: -17, z: -1 }],
-  terror: [{ x: 18, z: -19 }, { x: 27, z: -12 }, { x: 18, z: -16 }, { x: 25, z: -15 }, { x: 22, z: -19 }],
+  swat:   [cellCenter(2, 21), cellCenter(7, 21), cellCenter(12, 21), cellCenter(2, 12), cellCenter(7, 12)],
+  terror: [cellCenter(31, 2), cellCenter(26, 2), cellCenter(31, 12), cellCenter(26, 12), cellCenter(31, 21)],
 };
 // فاصله آزاد یک نقطه از همه موانع (منفی = داخل مانع)
 function clearanceAt(x, z, radius = 0.7) {
@@ -1848,7 +1788,6 @@ async function startRound() {
 
   updateHUD();
   refreshStatics();
-  document.getElementById('roundtext').textContent = `دور ${faNum(roundNum)}`;
   document.getElementById('banner').classList.remove('show');
   toast('⚡ برق قطع است | کلیک راست = چراغ‌قوه | ۱ ۲ ۳ = شاتگان/کلت/چاقو');
   const help = document.getElementById('helpcard');
@@ -1946,21 +1885,6 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
-
-  if (galleryOpen) {
-    const target = GPOS.clone().setY(1.7);
-    camera.position.set(
-      target.x + Math.sin(gAz) * Math.sin(gPol) * gDist,
-      target.y + Math.cos(gPol) * gDist,
-      target.z + Math.cos(gAz) * Math.sin(gPol) * gDist
-    );
-    camera.lookAt(target);
-    if (gModel?.userData?.mixer) gModel.userData.mixer.update(dt);
-    for (const m of mixers) m.update(dt);
-    for (const h of gunHolders) layoutGun(h, dt);
-    renderer.render(scene, camera);
-    return;
-  }
 
   let mx = 0, mz = 0;
   // حرکت در محورهای جهانی (دوربین همیشه رو به -Z نگاه می‌کند)
@@ -2078,7 +2002,7 @@ function animate() {
 }
 
 /* ----------------------------- اجرا ----------------------------- */
-const BUILD_VERSION = 'v9-real-char-guns';
+const BUILD_VERSION = 'v10-newmap';
 
 (async function init() {
   const msg = document.getElementById('loadmsg');
@@ -2086,10 +2010,10 @@ const BUILD_VERSION = 'v9-real-char-guns';
   await buildShell();
   msg.textContent = 'چیدن میز و تجهیزات…';
   await buildFurniture();
+  buildNavBlockers();   // پس از ساخت مبلمان، مسیرهای مسدود را علامت بزن
   msg.textContent = 'آماده‌سازی تیم‌ها…';
   playerModel = await buildPlayer();
   await startRound();
-  buildGalleryUI();
   document.getElementById('loading').style.display = 'none';
   const verEl = document.getElementById('version');
   if (verEl) verEl.textContent = BUILD_VERSION;

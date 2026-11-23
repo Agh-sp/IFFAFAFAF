@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import fs from 'node:fs';
+import { FURNITURE } from '../src/map.js';
 const loader = new GLTFLoader();
 const parse = f => new Promise((r, j) => { const b = fs.readFileSync(f); loader.parse(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), '', r, j); });
 const MAX_H = 5.5, FOV = 55;

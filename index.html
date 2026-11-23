@@ -204,6 +204,52 @@
     #mapwrap { display:none; }
     #midinfo { display:none; }
   }
+
+  /* ---------------- نوار باریک پایین ---------------- */
+  #bar {
+    position:absolute; bottom:12px; left:50%; transform:translateX(-50%);
+    display:flex; align-items:center; gap:14px; padding:8px 14px;
+    pointer-events:auto; white-space:nowrap;
+  }
+  #bar .g { display:flex; align-items:center; gap:6px; font-size:11px; opacity:.9; }
+  #bar .track { width:74px; height:9px; border-radius:5px; background:rgba(255,255,255,.14); overflow:hidden; }
+  #bar .track i { display:block; height:100%; transition:width .2s; }
+  #bar .w { display:flex; align-items:center; gap:7px; font-size:12px; border-inline-start:1px solid rgba(255,255,255,.12); padding-inline-start:12px; }
+  #bar .w span { color:#ffe9a8; font-weight:900; }
+  #bar .w b { font-size:12px; letter-spacing:.5px; }
+  #bar #slots { display:flex; gap:5px; }
+  #bar .slot {
+    pointer-events:auto; cursor:pointer; width:30px; height:30px; border-radius:8px;
+    background:rgba(16,28,42,.9); border:1px solid rgba(120,170,230,.2);
+    color:#c9d9ea; font-family:inherit; font-size:11px; font-weight:900;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #bar .slot.active { background:rgba(38,96,170,.75); border-color:#4aa8ff; color:#fff; }
+  #bar .gid { display:flex; gap:6px; }
+  #bar .abtn {
+    pointer-events:auto; cursor:pointer; position:relative; overflow:hidden;
+    width:38px; height:30px; border-radius:8px; border:1px solid rgba(140,190,255,.25);
+    background:rgba(20,34,52,.9); color:#dce9f8; font-family:inherit; font-size:12px;
+    display:flex; align-items:center; justify-content:center; gap:3px;
+  }
+  #bar .abtn .cd { position:absolute; bottom:0; left:0; right:0; background:rgba(90,160,255,.32); height:0%; }
+  #bar .abtn b, #bar .abtn .n { position:relative; z-index:1; }
+  #bar .abtn .n { font-size:9px; background:rgba(255,255,255,.16); border-radius:4px; padding:0 3px; }
+  #bar #torch { font-size:14px; opacity:.85; }
+  #torchstate.off { opacity:.35; }
+  #torchstate.on { filter:drop-shadow(0 0 6px #ffe08a); }
+
+  /* مینی‌مپ کوچک‌تر، گوشه پایین-چپ */
+  #mapwrap { position:absolute; bottom:12px; left:12px; padding:6px; width:150px; }
+  #mapwrap canvas { width:138px; height:106px; display:block; border-radius:8px; }
+  #mapwrap .cap { font-size:9px; text-align:center; opacity:.5; margin-top:3px; }
+  #corner { position:absolute; top:10px; left:10px; display:flex; flex-direction:column; gap:7px; }
+  .cbtn {
+    pointer-events:auto; cursor:pointer; width:34px; height:34px; border-radius:10px;
+    border:1px solid rgba(120,170,230,.22); background:rgba(6,12,20,.78);
+    color:#cfe0f2; font-size:15px; display:flex; align-items:center; justify-content:center;
+  }
+  .cbtn:active { transform:scale(.94); }
 </style>
 </head>
 <body>
@@ -214,64 +260,29 @@
   <div id="cross"></div>
   <div id="hitmark">✕</div>
 
-  <div id="top">
-    <div class="teambox panel blue">
-      <div class="head"><span class="dot"></span> تیم سوات</div>
-      <div class="bar"><i id="barS" style="width:100%"></i></div>
-      <div class="info"><span>نفرات: <b id="aliveS">4</b></span><span>کشته: <b id="killS">0</b></span></div>
-    </div>
-    <div id="midinfo" class="panel">
-      <div class="r" id="roundtext">دور ۱</div>
-      <div class="power"><i></i>برق قطع — وضعیت اضطراری</div>
-    </div>
-    <div class="teambox panel red">
-      <div class="head"><span class="dot"></span> تیم تروریست</div>
-      <div class="bar"><i id="barT" style="width:100%"></i></div>
-      <div class="info"><span>نفرات: <b id="aliveT">5</b></span><span>کشته: <b id="killT">0</b></span></div>
-    </div>
-  </div>
-
-  <div id="scorebox">
-    <div class="item panel">امتیاز <b id="score">0</b></div>
-  </div>
-
   <div id="corner">
-    <button class="cbtn" id="galleryBtn" title="گالری مدل‌ها">🎨</button>
-    <button class="cbtn" id="boardBtn" title="تخته امتیاز">📋</button>
     <button class="cbtn" id="muteBtn" title="صدا">🔊</button>
   </div>
 
-  <div id="health" class="panel">
-    <div class="row"><span>جان</span><div class="track"><i id="hpfill" style="width:100%"></i></div><div class="num" id="hptext">100</div></div>
-    <div class="row"><span>زره</span><div class="track"><i id="armorfill" style="width:100%"></i></div><div class="num" id="armortext">100</div></div>
-  </div>
-
-  <div id="weapons" class="panel">
-    <div id="wepname">تفنگ مهاجم AR-1</div>
-    <div id="wepinfo">
-      <span id="magtext">6 / 6</span>
-      <span style="font-size:11px;opacity:.65">R = خشاب</span>
-    </div>
+  <div id="bar" class="panel">
+    <div class="g"><span>جان</span><div class="track"><i id="hpfill" style="width:100%"></i></div></div>
+    <div class="g"><span>زره</span><div class="track"><i id="armorfill" style="width:100%"></i></div></div>
+    <div class="w"><span id="wepname">شاتگان</span><b id="magtext">6/6</b></div>
     <div id="slots">
-      <button class="slot active" data-w="Shotgun"><b>۱</b> شاتگان</button>
-      <button class="slot" data-w="Colt"><b>۲</b> کلت</button>
-      <button class="slot" data-w="Knife"><b>۳</b> چاقو</button>
+      <button class="slot active" data-w="Shotgun"><b>۱</b></button>
+      <button class="slot" data-w="Colt"><b>۲</b></button>
+      <button class="slot" data-w="Knife"><b>۳</b></button>
     </div>
-    <div id="torch">
-      <span class="tlabel">🔦 چراغ‌قوه</span>
-      <span id="torchstate" class="on">روشن</span>
-      <span class="thint">کلیک راست / E</span>
+    <div class="gid">
+      <button class="abtn" id="grenbtn"><div class="cd" id="cdG"></div><b>💣</b><span class="n" id="ammoG">3</span></button>
+      <button class="abtn" id="smokebtn"><div class="cd" id="cdS"></div><b>💨</b><span class="n" id="ammoS">3</span></button>
     </div>
-    <div class="wep-actions">
-      <button class="abtn" id="grenbtn"><div class="cd" id="cdG"></div><b>💣 نارنجک Q</b><span class="n" id="ammoG">3</span></button>
-      <button class="abtn" id="smokebtn"><div class="cd" id="cdS"></div><b>💨 دودزا F</b><span class="n" id="ammoS">3</span></button>
-    </div>
+    <div id="torch"><span id="torchstate" class="on">🔦</span></div>
   </div>
 
   <div id="mapwrap" class="panel">
     <canvas id="minimap"></canvas>
-    <div class="cap">نقشه شرکت</div>
-    <div id="version" style="font-size:9px;opacity:.35;text-align:center;margin-top:2px">—</div>
+    <div class="cap" id="version">—</div>
   </div>
 
   <div id="debug"></div>
@@ -282,34 +293,6 @@
 <div id="joy"><div id="joyknob"></div></div>
 <div id="firebtn">🔥</div>
 
-<div id="gallery">
-  <div id="ghead"><h3>🎨 گالری مدل‌های بازی</h3><button id="gclose">✕</button></div>
-  <div id="gname">—</div>
-  <div id="glist"></div>
-  <div id="ghint">مدل روی سکو با کشیدن ماوس می‌چرخد. همه‌ی مدل‌ها GLB واقعی از پک‌های Quaternius هستند.</div>
-</div>
-
-<div id="scoreboard">
-  <div class="card">
-    <h3>📋 وضعیت تیم‌ها</h3>
-    <div class="cols">
-      <div class="t blue">
-        <h4>تیم سوات</h4>
-        <p><span>نفرات زنده</span><b id="sbAliveS">4</b></p>
-        <p><span>کشته‌ها</span><b id="sbKillS">0</b></p>
-        <p><span>توانایی ویژه</span><b>ورود انفجاری / چراغ‌قوه</b></p>
-      </div>
-      <div class="t red">
-        <h4>تیم تروریست</h4>
-        <p><span>نفرات زنده</span><b id="sbAliveT">5</b></p>
-        <p><span>کشته‌ها</span><b id="sbKillT">0</b></p>
-        <p><span>توانایی ویژه</span><b>دودزا / کمین در تاریکی</b></p>
-      </div>
-    </div>
-    <button class="close" id="boardClose">بستن</button>
-  </div>
-</div>
-
 <div id="helpcard">
   <h4>🔦 راهنمای سریع</h4>
   <div class="k"><b>کلیک راست</b><span>چراغ‌قوه روشن/خاموش</span></div>
@@ -318,7 +301,6 @@
   <div class="k"><b>کلیک چپ</b><span>شلیک / ضربه</span></div>
   <div class="k"><b>R</b><span>پر کردن خشاب</span></div>
   <div class="k"><b>Q / F</b><span>نارنجک / دودزا</span></div>
-  <div class="k"><b>Tab</b><span>تخته امتیاز</span></div>
   <p class="note">در تاریکی هیچ‌کس کسی را نمی‌بیند — فقط چیزی که در مخروط چراغ‌قوه‌ات باشد.</p>
 </div>
 

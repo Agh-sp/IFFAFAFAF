@@ -2,14 +2,13 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import fs from 'node:fs';
+import { FURNITURE } from '../src/map.js';
 const loader = new GLTFLoader();
 const parse = f => new Promise((r, j) => { const b = fs.readFileSync(f); loader.parse(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), '', r, j); });
 const MAX_H = 5.5, MAX_XZ = 12;
 
-const src = fs.readFileSync('src/main.js', 'utf8');
 const seen = new Map();
-for (const m of src.matchAll(/\{ n: '([\w]+)', x: (-?[\d.]+), z: (-?[\d.]+), r: ([^,]+), s: ([\d.]+)(?:, mode: '(\w+)')?/g))
-  if (!seen.has(m[1])) seen.set(m[1], { s: +m[5], mode: m[6] || 'height' });
+for (const f of FURNITURE) if (!seen.has(f.n)) seen.set(f.n, { s: f.s, mode: f.mode || 'height' });
 
 let bad = 0;
 for (const [n, { s, mode }] of seen) {
