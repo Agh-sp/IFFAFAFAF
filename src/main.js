@@ -353,8 +353,13 @@ function normalizedGeometry(gltf, target, mode = 'footprint') {
   return { geo, mat: mesh.material, height: geo.boundingBox.max.y };
 }
 
-function instancedFrom(gltf, placements, target, mode = 'footprint') {
+function instancedFrom(gltf, placements, target, mode = 'footprint', opts = {}) {
   const { geo, mat } = normalizedGeometry(gltf, target, mode);
+  if (opts.transparent) {
+    mat.transparent = true;
+    mat.opacity = 0.72;
+    mat.depthWrite = false;
+  }
   const im = new THREE.InstancedMesh(geo, mat, placements.length);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1);
   placements.forEach((p, i) => {
@@ -388,9 +393,17 @@ async function buildShell() {
   ]);
   instancedFrom(fA, floorA, TILE);
   instancedFrom(fB, floorB, TILE);
-  instancedFrom(wA, wallA, TILE);
-  instancedFrom(wB, wallB, TILE);
-  instancedFrom(wT, wallTall, TILE);
+  // دیوارها با ارتفاع کنترل‌شده ساخته می‌شوند تا دوربین از بالا دید کامل داشته باشد
+  const wallA2 = instancedFrom(wA, wallA, TILE, 'footprint', { transparent: true });
+  const wallB2 = instancedFrom(wB, wallB, TILE, 'footprint', { transparent: true });
+  const wallT2 = instancedFrom(wT, wallTall, TILE, 'footprint', { transparent: true });
+  for (const im of [wallA2, wallB2, wallT2]) {
+    const bb = im.geometry.boundingBox;
+    if (!bb) im.geometry.computeBoundingBox();
+    const h = im.geometry.boundingBox.max.y;
+    // ارتفاع دیوار از ۲.۲ متر بیشتر نشود
+    if (h > 2.2) { im.scale.y = 2.2 / h; im.updateMatrix?.(); }
+  }
 }
 
 /* -------------------------- مبلمان شرکت -------------------------- */
@@ -1163,7 +1176,7 @@ renderer.domElement.addEventListener('pointerdown', () => renderer.domElement.fo
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; });
 let mouseX = innerWidth / 2, mouseY = innerHeight / 2, mouseDown = false;
 let joyVec = { x: 0, y: 0 }, joyFire = false, joyMoving = false;
-let camZoom = 25;
+let camZoom = 27;
 let camShakeX = 0;
 const camTarget0 = new THREE.Vector3();
 
@@ -1209,7 +1222,7 @@ addEventListener('wheel', e => {
     const n = (i + (e.deltaY > 0 ? 1 : -1) + PLAYER_LOADOUT.length) % PLAYER_LOADOUT.length;
     equipWeapon(PLAYER_LOADOUT[n]);
   } else {
-    camZoom = clamp(camZoom + e.deltaY * 0.02, 13, 40);
+    camZoom = clamp(camZoom + e.deltaY * 0.02, 16, 46);
   }
 }, { passive: true });
 addEventListener('resize', () => {
@@ -1738,16 +1751,22 @@ function animate() {
   // دوربین با زاویه ثابت ۶۵ درجه بالای بازیکن می‌ماند. اگر دوربین با
   // aimAngle بچرخد، هنگام نگاه به سمت دور، نما افقی می‌شود و دیوارها
   // همه‌چیز را می‌بندند. پس جهت دوربین به بازیکن قفل است.
-  const camTarget = new THREE.Vector3(playerG.position.x, 0.5, playerG.position.z);
+  // نقطه هدف کمی «جلوی» بازیکن است تا فضای پیش‌رو در کادر بیاید
+  const ahead = 4.5;
+  const camTarget = new THREE.Vector3(
+    playerG.position.x + Math.sin(aimAngle) * ahead * 0.5,
+    0.5,
+    playerG.position.z + Math.cos(aimAngle) * ahead * 0.5
+  );
   camTarget0.copy(camTarget);
-  const back = camZoom * 0.48;           // فاصله افقی روی محور Z جهانی
+  const back = camZoom * 0.34;           // فاصله افقی کمتر = زاویه تندتر (نمای از بالا)
   const desired = new THREE.Vector3(
     camTarget.x + camShakeX,
     camZoom,
     camTarget.z + back
   );
   camera.position.lerp(desired, 1 - Math.pow(0.0009, dt));
-  camera.position.y = Math.max(14, camera.position.y);
+  camera.position.y = Math.max(18, camera.position.y);
   if (shake > 0) {
     camera.position.x += rand(-shake, shake);
     camera.position.y += rand(-shake, shake) * 0.6;
@@ -1800,6 +1819,8 @@ function animate() {
 }
 
 /* ----------------------------- اجرا ----------------------------- */
+const BUILD_VERSION = 'v6-camera-topdown';
+
 (async function init() {
   const msg = document.getElementById('loadmsg');
   msg.textContent = 'ساخت طبقات و دیوارهای شرکت…';
@@ -1811,5 +1832,8 @@ function animate() {
   await startRound();
   buildGalleryUI();
   document.getElementById('loading').style.display = 'none';
+  const verEl = document.getElementById('version');
+  if (verEl) verEl.textContent = BUILD_VERSION;
+  console.log('[نبرد شرکت] نسخه:', BUILD_VERSION);
   animate();
 })();
