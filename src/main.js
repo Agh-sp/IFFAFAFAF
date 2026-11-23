@@ -69,7 +69,7 @@ const container = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
 renderer.setSize(innerWidth, innerHeight);
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = false;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -90,16 +90,11 @@ camera.position.set(0, 26, 16);
 // چراغ‌های اضطراری باقی‌مانده چیزی را روشن می‌کنند.
 // نور محیطی «خیلی کم ولی کافی»: بدون این، کل صفحه سیاه مطلق می‌شود
 // و بازیکن حتی زمین زیر پایش را نمی‌بیند. تاریکی از کم بودنش می‌آید، نه از صفر بودنش.
-const ambientLight = new THREE.AmbientLight(0x4a5f75, 1.25);
+const ambientLight = new THREE.AmbientLight(0x55697f, 1.35);
 scene.add(ambientLight);
 // نور عمودی کم‌سو از بالا: بدون این، دیوارها و کف کاملاً تخت و سیاه می‌شوند
-const overhead = new THREE.DirectionalLight(0x93acca, 0.85);
-overhead.position.set(6, 40, 10);
-overhead.castShadow = true;
-overhead.shadow.mapSize.set(1024, 1024);
-overhead.shadow.camera.left = -34; overhead.shadow.camera.right = 34;
-overhead.shadow.camera.top = 24; overhead.shadow.camera.bottom = -24;
-overhead.shadow.camera.far = 90;
+const overhead = new THREE.DirectionalLight(0x93acca, 0.7);
+overhead.position.set(8, 40, 12);
 scene.add(overhead);
 
 /* ------------------------------ لودر ------------------------------ */
@@ -113,7 +108,7 @@ function prep(src, target, mode = 'height') {
   const rigged = src.clips.length > 0;
   const root = rigged ? SkeletonUtils.clone(src.scene) : src.scene.clone(true);
   root.traverse(o => {
-    if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; }
+    if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; o.frustumCulled = false; }
   });
   const b = bboxOf(root), s = b.getSize(new THREE.Vector3());
   const dim = mode === 'footprint' ? Math.max(s.x, s.z) : mode === 'length' ? Math.max(s.x, s.y, s.z) : s.y;
@@ -128,7 +123,7 @@ function loadProp(cat, name, target, mode = 'height') {
   const p = pathOf(cat, name);
   if (!cache.has(p)) {
     cache.set(p, loader.loadAsync(p).then(g => {
-      g.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      g.scene.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; } });
       return { scene: g.scene, clips: [] };
     }));
   }
@@ -524,13 +519,13 @@ let aimAngle = 0;
 const lightState = { on: true, battery: 100 };
 
 function buildWeaponLight(parent) {
-  const spot = new THREE.SpotLight(0xfff0c8, 0, 34, 0.46, 0.5, 0.75);
+  const spot = new THREE.SpotLight(0xfff0c8, 0, 32, 0.34, 0.42, 0.8);
   spot.position.set(0, 0, 0);
   spot.target.position.set(0, 0, 14);
   spot.castShadow = false;
   parent.add(spot, spot.target);
   // هاله‌ی کوچک اطراف دهانه که فقط نزدیک را نشان می‌دهد
-  const halo = new THREE.PointLight(0xffe6b0, 0, 5.5, 1.6);
+  const halo = new THREE.PointLight(0xffe6b0, 0, 3.5, 1.9);
   halo.position.set(0, 0.1, 0.5);
   parent.add(halo);
   return { spot, halo, target: spot.target };
@@ -547,7 +542,7 @@ wLight.spot.intensity = 0;
 wLight.target.position.set(0, 0, 16);
 
 // یک نور ضعیف و خیلی نزدیک به خود بازیکن تا در تاریکی مطلق گم نشود
-const selfGlow = new THREE.PointLight(0xb8d2f5, 12, 10, 1.15);
+const selfGlow = new THREE.PointLight(0xb8d2f5, 4.5, 6.5, 1.6);
 selfGlow.position.set(0, 1.1, 0);
 playerG.add(selfGlow);
 
@@ -1143,7 +1138,9 @@ renderer.domElement.addEventListener('pointerdown', () => renderer.domElement.fo
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; });
 let mouseX = innerWidth / 2, mouseY = innerHeight / 2, mouseDown = false;
 let joyVec = { x: 0, y: 0 }, joyFire = false, joyMoving = false;
-let camZoom = 23;
+let camZoom = 25;
+let camShakeX = 0;
+const camTarget0 = new THREE.Vector3();
 
 const CODE_FALLBACK = {
   w: 'KeyW', a: 'KeyA', s: 'KeyS', d: 'KeyD', r: 'KeyR', q: 'KeyQ', f: 'KeyF', e: 'KeyE',
@@ -1619,6 +1616,7 @@ function updateDebug(dt) {
     `چرخش: ${(aimAngle * 180 / Math.PI).toFixed(0)}°  |  سلاح: ${player.weapon}\n` +
     `چراغ‌قوه: ${lightState.on ? 'روشن' : 'خاموش'}  شدت: ${wLight.spot.intensity.toFixed(1)}\n` +
     `دوربین: y=${camera.position.y.toFixed(1)} z=${camera.position.z.toFixed(1)}  فاصله: ${camera.position.distanceTo(playerG.position).toFixed(1)}\n` +
+    `زاویه دوربین: ${(Math.atan2(camera.position.y - camTarget0.y, Math.hypot(camera.position.x - camTarget0.x, camera.position.z - camTarget0.z)) * 180 / Math.PI).toFixed(0)}°\n` +
     `کلیدها: ${keysDown}\n` +
     `بازیگران زنده: ${alive}  |  خشاب: ${player.mag}\n` +
     `مه: ${scene.fog ? scene.fog.density : 'خاموش'}  |  نقاط نور: ${lightsInScene()}\n` +
@@ -1652,6 +1650,7 @@ function animate() {
   }
 
   let mx = 0, mz = 0;
+  // حرکت در محورهای جهانی (دوربین همیشه رو به -Z نگاه می‌کند)
   if (keys['KeyW'] || keys['ArrowUp']) mz -= 1;
   if (keys['KeyS'] || keys['ArrowDown']) mz += 1;
   if (keys['KeyA'] || keys['ArrowLeft']) mx -= 1;
@@ -1694,19 +1693,20 @@ function animate() {
     if (!a.alive && a.g.userData.deadAt && performance.now() - a.g.userData.deadAt > 2200) a.g.visible = false;
   }
 
-  // ---- دوربین از بالا (top-down) ----
-  // بازیکن کمی پایین‌تر از مرکز کادر قرار می‌گیرد تا جلوی او بیشتر دیده شود
-  const camTarget = new THREE.Vector3(playerG.position.x, 0.8, playerG.position.z - 2.2);
-  const back = camZoom * 0.42;           // فاصله افقی دوربین پشت بازیکن (شیب تند = دید از بالا)
-  const ahead = 3.0;                      // کمی به سمت جهت نگاه
+  // ---- دوربین از بالا (top-down، زاویه ثابت) ----
+  // دوربین با زاویه ثابت ۶۵ درجه بالای بازیکن می‌ماند. اگر دوربین با
+  // aimAngle بچرخد، هنگام نگاه به سمت دور، نما افقی می‌شود و دیوارها
+  // همه‌چیز را می‌بندند. پس جهت دوربین به بازیکن قفل است.
+  const camTarget = new THREE.Vector3(playerG.position.x, 0.5, playerG.position.z);
+  camTarget0.copy(camTarget);
+  const back = camZoom * 0.48;           // فاصله افقی روی محور Z جهانی
   const desired = new THREE.Vector3(
-    camTarget.x - Math.sin(aimAngle) * (ahead * 0.35),
+    camTarget.x + camShakeX,
     camZoom,
-    camTarget.z + back + Math.cos(aimAngle) * 0.5
+    camTarget.z + back
   );
-  camera.position.lerp(desired, 1 - Math.pow(0.0016, dt));
-  // هرگز اجازه نده دوربین زیر سقف یا داخل دیوار برود
-  camera.position.y = Math.max(12, camera.position.y);
+  camera.position.lerp(desired, 1 - Math.pow(0.0009, dt));
+  camera.position.y = Math.max(14, camera.position.y);
   if (shake > 0) {
     camera.position.x += rand(-shake, shake);
     camera.position.y += rand(-shake, shake) * 0.6;
@@ -1721,7 +1721,7 @@ function animate() {
 
   // برق اضطراری: چشمک قرمز
   const pulse = (Math.sin(t * 1.4) + 1) / 2;
-  emergency.intensity = pulse > 0.93 ? 70 : pulse > 0.86 ? 16 : 0;
+  emergency.intensity = pulse > 0.93 ? 40 : pulse > 0.86 ? 9 : 0;
   emergency.position.set(Math.sin(t * 0.11) * 9, 5, Math.cos(t * 0.13) * 7);
 
   // ---- چراغ‌قوه‌ها ----
@@ -1732,7 +1732,7 @@ function animate() {
   weaponLightGroup.position.x = (WEAPONS[player.weapon].kind === 'pistol' || WEAPONS[player.weapon].kind === 'melee' ? 0.22 : 0.32)
     + Math.sin(t * 6) * (joyMoving ? 0.035 : 0.014);
   weaponLightGroup.position.y = 1.5 + Math.sin(t * 4.3) * 0.012;
-  wLight.halo.intensity += ((lightState.on ? 6 : 0) - wLight.halo.intensity) * Math.min(1, dt * 12);
+  wLight.halo.intensity += ((lightState.on ? 2.2 : 0) - wLight.halo.intensity) * Math.min(1, dt * 12);
   selfGlow.visible = lightState.on;
 
   // چراغ‌قوه ai: سوات‌ها روشن، تروریست‌ها گاهی روشن می‌شوند
