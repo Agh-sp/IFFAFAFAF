@@ -90,10 +90,10 @@ camera.position.set(0, 26, 16);
 // چراغ‌های اضطراری باقی‌مانده چیزی را روشن می‌کنند.
 // نور محیطی «خیلی کم ولی کافی»: بدون این، کل صفحه سیاه مطلق می‌شود
 // و بازیکن حتی زمین زیر پایش را نمی‌بیند. تاریکی از کم بودنش می‌آید، نه از صفر بودنش.
-const ambientLight = new THREE.AmbientLight(0x55697f, 1.35);
+const ambientLight = new THREE.AmbientLight(0x6b7f96, 1.55);
 scene.add(ambientLight);
 // نور عمودی کم‌سو از بالا: بدون این، دیوارها و کف کاملاً تخت و سیاه می‌شوند
-const overhead = new THREE.DirectionalLight(0x93acca, 0.7);
+const overhead = new THREE.DirectionalLight(0x9fb6d4, 0.95);
 overhead.position.set(8, 40, 12);
 scene.add(overhead);
 
@@ -580,7 +580,7 @@ wLight.spot.intensity = 0;
 wLight.target.position.set(0, 0, 16);
 
 // یک نور ضعیف و خیلی نزدیک به خود بازیکن تا در تاریکی مطلق گم نشود
-const selfGlow = new THREE.PointLight(0xb8d2f5, 4.5, 6.5, 1.6);
+const selfGlow = new THREE.PointLight(0xb8d2f5, 7, 8.5, 1.4);
 selfGlow.position.set(0, 1.1, 0);
 playerG.add(selfGlow);
 
@@ -660,6 +660,7 @@ async function attachGun(charRoot, gunName, offset) {
 let playerGunHolder = null;
 async function buildPlayer() {
   playerModel = await loadCharacter('Swat', 1.8);
+  // در نمای از بالا کاراکتر باید کمی بزرگ‌تر دیده شود
   tintCharacter(playerModel, 'swat');
   playerModel.position.y = 0;
   playerG.add(playerModel);
@@ -1176,7 +1177,7 @@ renderer.domElement.addEventListener('pointerdown', () => renderer.domElement.fo
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; });
 let mouseX = innerWidth / 2, mouseY = innerHeight / 2, mouseDown = false;
 let joyVec = { x: 0, y: 0 }, joyFire = false, joyMoving = false;
-let camZoom = 27;
+let camZoom = 23;
 let camShakeX = 0;
 const camTarget0 = new THREE.Vector3();
 
@@ -1222,7 +1223,7 @@ addEventListener('wheel', e => {
     const n = (i + (e.deltaY > 0 ? 1 : -1) + PLAYER_LOADOUT.length) % PLAYER_LOADOUT.length;
     equipWeapon(PLAYER_LOADOUT[n]);
   } else {
-    camZoom = clamp(camZoom + e.deltaY * 0.02, 16, 46);
+    camZoom = clamp(camZoom + e.deltaY * 0.02, 17, 30);   // زوم محدود: دوربین از نقشه بیرون نزند
   }
 }, { passive: true });
 addEventListener('resize', () => {
@@ -1654,6 +1655,7 @@ function updateDebug(dt) {
     `چرخش: ${(aimAngle * 180 / Math.PI).toFixed(0)}°  |  سلاح: ${player.weapon}\n` +
     `چراغ‌قوه: ${lightState.on ? 'روشن' : 'خاموش'}  شدت: ${wLight.spot.intensity.toFixed(1)}\n` +
     `دوربین: y=${camera.position.y.toFixed(1)} z=${camera.position.z.toFixed(1)}  فاصله: ${camera.position.distanceTo(playerG.position).toFixed(1)}\n` +
+    `camZoom: ${camZoom.toFixed(0)}  |  محدوده نقشه: ±${HW.toFixed(0)}x±${HH.toFixed(0)}\n` +
     `زاویه دوربین: ${(Math.atan2(camera.position.y - camTarget0.y, Math.hypot(camera.position.x - camTarget0.x, camera.position.z - camTarget0.z)) * 180 / Math.PI).toFixed(0)}°\n` +
     `کلیدها: ${keysDown}\n` +
     `بازیگران زنده: ${alive}  |  خشاب: ${player.mag}\n` +
@@ -1752,21 +1754,20 @@ function animate() {
   // aimAngle بچرخد، هنگام نگاه به سمت دور، نما افقی می‌شود و دیوارها
   // همه‌چیز را می‌بندند. پس جهت دوربین به بازیکن قفل است.
   // نقطه هدف کمی «جلوی» بازیکن است تا فضای پیش‌رو در کادر بیاید
-  const ahead = 4.5;
-  const camTarget = new THREE.Vector3(
-    playerG.position.x + Math.sin(aimAngle) * ahead * 0.5,
-    0.5,
-    playerG.position.z + Math.cos(aimAngle) * ahead * 0.5
-  );
+  // دوربین هرگز با aimAngle نمی‌چرخد. هدف همیشه خود بازیکن است.
+  const camTarget = new THREE.Vector3(playerG.position.x, 0.5, playerG.position.z);
   camTarget0.copy(camTarget);
-  const back = camZoom * 0.34;           // فاصله افقی کمتر = زاویه تندتر (نمای از بالا)
+  const back = camZoom * 0.22;           // فاصله افقی کم = زاویه تند (نمای از بالا)
   const desired = new THREE.Vector3(
     camTarget.x + camShakeX,
     camZoom,
     camTarget.z + back
   );
   camera.position.lerp(desired, 1 - Math.pow(0.0009, dt));
-  camera.position.y = Math.max(18, camera.position.y);
+  // دوربین داخل محدوده نقشه قفل شود تا از بیرون ساختمان نگاه نکند
+  camera.position.y = Math.max(16, camera.position.y);
+  camera.position.x = clamp(camera.position.x, -HW + 3, HW - 3);
+  camera.position.z = clamp(camera.position.z, -HH + 3, HH - 3);
   if (shake > 0) {
     camera.position.x += rand(-shake, shake);
     camera.position.y += rand(-shake, shake) * 0.6;
@@ -1819,7 +1820,7 @@ function animate() {
 }
 
 /* ----------------------------- اجرا ----------------------------- */
-const BUILD_VERSION = 'v6-camera-topdown';
+const BUILD_VERSION = 'v7-camera-clamped';
 
 (async function init() {
   const msg = document.getElementById('loadmsg');
