@@ -78,7 +78,9 @@ container.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x010204);
-scene.fog = new THREE.FogExp2(0x010204, 0.055);
+// مه خیلی رقیق: دوربین ۳۳ متر از بازیکن فاصله دارد؛ با چگالی بالا
+// همه‌چیز حتی کف زیر پای بازیکن با رنگ مه (تقریباً سیاه) جایگزین می‌شد.
+scene.fog = new THREE.FogExp2(0x02040a, 0.008);
 
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 260);
 camera.position.set(0, 26, 16);
@@ -86,7 +88,7 @@ camera.position.set(0, 26, 16);
 // برق قطع است: نور محیط بسیار کم
 // تاریکی مطلق: هیچ نور محیطی‌ای وجود ندارد. فقط چراغ‌قوه‌ها و
 // چراغ‌های اضطراری باقی‌مانده چیزی را روشن می‌کنند.
-scene.add(new THREE.AmbientLight(0x0a0f18, 0.32));
+scene.add(new THREE.AmbientLight(0x121a26, 0.55));   // تقریباً هیچ — فقط برای دیده شدن خطوط کلی
 
 /* ------------------------------ لودر ------------------------------ */
 const loader = new GLTFLoader();
@@ -465,7 +467,7 @@ const EMERGENCY_LAMPS = [
   [-22, -14], [0, -16], [22, -15], [-20, 16], [0, 17], [21, 16], [-10, 0], [12, 0],
 ];
 for (const [x, z] of EMERGENCY_LAMPS) {
-  const l = new THREE.PointLight(0xd8452f, 1.1, 5.5, 2);
+  const l = new THREE.PointLight(0xd8452f, 2.6, 7, 1.6);
   l.position.set(x, 3.2, z);
   scene.add(l);
   const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff7a5a }));
@@ -491,13 +493,13 @@ let aimAngle = 0;
 const lightState = { on: true, battery: 100 };
 
 function buildWeaponLight(parent) {
-  const spot = new THREE.SpotLight(0xfff4d6, 0, 26, 0.30, 0.35, 1.1);
+  const spot = new THREE.SpotLight(0xfff0c8, 0, 30, 0.34, 0.42, 0.9);
   spot.position.set(0, 0, 0);
   spot.target.position.set(0, 0, 14);
   spot.castShadow = false;
   parent.add(spot, spot.target);
   // هاله‌ی کوچک اطراف دهانه که فقط نزدیک را نشان می‌دهد
-  const halo = new THREE.PointLight(0xffe9bb, 0, 4.5, 2);
+  const halo = new THREE.PointLight(0xffe6b0, 0, 5.5, 1.6);
   halo.position.set(0, 0.1, 0.5);
   parent.add(halo);
   return { spot, halo, target: spot.target };
@@ -514,7 +516,7 @@ wLight.spot.intensity = 0;
 wLight.target.position.set(0, 0, 16);
 
 // یک نور ضعیف و خیلی نزدیک به خود بازیکن تا در تاریکی مطلق گم نشود
-const selfGlow = new THREE.PointLight(0x8fb0dd, 0.55, 2.6, 2);
+const selfGlow = new THREE.PointLight(0x9fc0ea, 2.2, 4.5, 1.5);
 selfGlow.position.set(0, 1.1, 0);
 playerG.add(selfGlow);
 
@@ -620,10 +622,11 @@ async function equipWeapon(name) {
   // بدنه بازیکن همیشه با aimAngle می‌چرخد، پس نور دقیقاً جلوی اسلحه می‌ماند.
   if (weaponLightGroup.parent !== playerG) playerG.add(weaponLightGroup);
   const isPistol = d.kind === 'pistol' || d.kind === 'melee';
-  weaponLightGroup.position.set(isPistol ? 0.16 : 0.3, 1.12, 0.42);
+  // ارتفاع دست اسلحه در مدل سوات ≈ ۱.۴۳ متر است (اندازه‌گیری‌شده)
+  weaponLightGroup.position.set(isPistol ? 0.20 : 0.34, 1.43, 0.55);
   weaponLightGroup.rotation.set(0, 0, 0);
   wLight.spot.position.set(0, 0, 0);
-  wLight.spot.target.position.set(0, -0.72, 18);
+  wLight.spot.target.position.set(0, -0.85, 20);
   wLight.halo.position.set(0, 0, 0.55);
   toast(`🔫 ${d.fa} برداشته شد`);
   updateHUD();
@@ -1103,24 +1106,41 @@ function updateEffects(dt) {
 
 /* ----------------------------- ورودی ----------------------------- */
 const keys = {};
+// اطمینان از اینکه صفحه فوکوس دارد تا کلیدها از دست نروند
+renderer.domElement.tabIndex = 0;
+renderer.domElement.addEventListener('pointerdown', () => renderer.domElement.focus());
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; });
 let mouseX = innerWidth / 2, mouseY = innerHeight / 2, mouseDown = false;
 let joyVec = { x: 0, y: 0 }, joyFire = false, joyMoving = false;
-let camZoom = 27;
+let camZoom = 21;
 
+const CODE_FALLBACK = {
+  w: 'KeyW', a: 'KeyA', s: 'KeyS', d: 'KeyD', r: 'KeyR', q: 'KeyQ', f: 'KeyF', e: 'KeyE',
+  '1': 'Digit1', '2': 'Digit2', '3': 'Digit3', '۱': 'Digit1', '۲': 'Digit2', '۳': 'Digit3',
+  'ArrowUp': 'ArrowUp', 'ArrowDown': 'ArrowDown', 'ArrowLeft': 'ArrowLeft', 'ArrowRight': 'ArrowRight',
+  Tab: 'Tab', Escape: 'Escape', ' ': 'Space',
+};
 addEventListener('keydown', e => {
+  // اگر صفحه‌کلید غیرانگلیسی باشد e.code خالی/متفاوت است؛ از e.key هم کمک بگیر
+  const code = e.code || CODE_FALLBACK[e.key] || CODE_FALLBACK[e.key?.toLowerCase?.()];
+  if (code) keys[code] = true;
   keys[e.code] = true;
-  if (e.code === 'KeyR') startReload();
-  if (e.code === 'KeyQ') throwGrenade('grenade');
-  if (e.code === 'KeyF') throwGrenade('smoke');
-  if (e.code === 'KeyE') toggleFlashlight();
-  if (e.code === 'Digit1') equipWeapon('Shotgun');
-  if (e.code === 'Digit2') equipWeapon('Colt');
-  if (e.code === 'Digit3') equipWeapon('Knife');
-  if (e.code === 'Tab') { e.preventDefault(); toggleBoard(); }
-  if (e.code === 'Escape') closePanels();
-  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(e.code)) e.preventDefault();
+  if (code === 'KeyR') startReload();
+  if (code === 'KeyQ') throwGrenade('grenade');
+  if (code === 'KeyF') throwGrenade('smoke');
+  if (code === 'KeyE') toggleFlashlight();
+  if (code === 'Digit1') equipWeapon('Shotgun');
+  if (code === 'Digit2') equipWeapon('Colt');
+  if (code === 'Digit3') equipWeapon('Knife');
+  if (code === 'Tab') { e.preventDefault(); toggleBoard(); }
+  if (code === 'Escape') closePanels();
+  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(code)) e.preventDefault();
 });
-addEventListener('keyup', e => { keys[e.code] = false; });
+addEventListener('keyup', e => {
+  const code = e.code || CODE_FALLBACK[e.key] || CODE_FALLBACK[e.key?.toLowerCase?.()];
+  if (code) keys[code] = false;
+  keys[e.code] = false;
+});
 addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
 renderer.domElement.addEventListener('mousedown', e => {
   if (e.button === 0) mouseDown = true;
@@ -1136,7 +1156,7 @@ addEventListener('wheel', e => {
     const n = (i + (e.deltaY > 0 ? 1 : -1) + PLAYER_LOADOUT.length) % PLAYER_LOADOUT.length;
     equipWeapon(PLAYER_LOADOUT[n]);
   } else {
-    camZoom = clamp(camZoom + e.deltaY * 0.02, 16, 44);
+    camZoom = clamp(camZoom + e.deltaY * 0.02, 13, 40);
   }
 }, { passive: true });
 addEventListener('resize', () => {
@@ -1512,6 +1532,38 @@ function screenAim() {
   return aimRay.ray.intersectPlane(aimPlane, p) ? p : null;
 }
 
+let debugOn = location.search.includes('debug') || location.hash.includes('debug');
+let fpsAcc = 0, fpsFrames = 0, fpsShown = 0;
+addEventListener('keydown', e => {
+  if (e.code === 'F3') { e.preventDefault(); debugOn = !debugOn; }
+});
+
+function updateDebug(dt) {
+  const el = document.getElementById('debug');
+  if (!el) return;
+  el.style.display = debugOn ? 'block' : 'none';
+  if (!debugOn) return;
+  fpsAcc += dt; fpsFrames++;
+  if (fpsAcc > 0.4) { fpsShown = Math.round(fpsFrames / fpsAcc); fpsAcc = 0; fpsFrames = 0; }
+  const alive = actors.filter(a => a.alive).length;
+  const keysDown = Object.keys(keys).filter(k => keys[k]).join(',') || '—';
+  el.textContent =
+    `FPS ${fpsShown}\n` +
+    `بازیکن: x=${playerG.position.x.toFixed(1)} y=${playerG.position.y.toFixed(1)} z=${playerG.position.z.toFixed(1)}\n` +
+    `چرخش: ${(aimAngle * 180 / Math.PI).toFixed(0)}°  |  سلاح: ${player.weapon}\n` +
+    `چراغ‌قوه: ${lightState.on ? 'روشن' : 'خاموش'}  شدت: ${wLight.spot.intensity.toFixed(1)}\n` +
+    `دوربین: y=${camera.position.y.toFixed(1)} z=${camera.position.z.toFixed(1)}  فاصله: ${camera.position.distanceTo(playerG.position).toFixed(1)}\n` +
+    `کلیدها: ${keysDown}\n` +
+    `بازیگران زنده: ${alive}  |  خشاب: ${player.mag}\n` +
+    `مه: ${scene.fog ? scene.fog.density : 'خاموش'}  |  نقاط نور: ${lightsInScene()}`;
+}
+
+function lightsInScene() {
+  let n = 0;
+  scene.traverse(o => { if (o.isLight) n++; });
+  return n;
+}
+
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -1574,21 +1626,26 @@ function animate() {
     if (!a.alive && a.g.userData.deadAt && performance.now() - a.g.userData.deadAt > 2200) a.g.visible = false;
   }
 
-  // دوربین از بالا
-  const camTarget = new THREE.Vector3(playerG.position.x, 0, playerG.position.z - 1.4);
+  // ---- دوربین از بالا (top-down) ----
+  // بازیکن کمی پایین‌تر از مرکز کادر قرار می‌گیرد تا جلوی او بیشتر دیده شود
+  const camTarget = new THREE.Vector3(playerG.position.x, 0.8, playerG.position.z - 2.2);
+  const back = camZoom * 0.62;           // فاصله افقی دوربین پشت بازیکن
+  const ahead = 3.0;                      // کمی به سمت جهت نگاه
   const desired = new THREE.Vector3(
-    camTarget.x + Math.sin(aimAngle) * 1.6 + recoil * 0.6,
+    camTarget.x - Math.sin(aimAngle) * (ahead * 0.35),
     camZoom,
-    camTarget.z + camZoom * 0.72
+    camTarget.z + back + Math.cos(aimAngle) * 0.5
   );
   camera.position.lerp(desired, 1 - Math.pow(0.0016, dt));
+  // هرگز اجازه نده دوربین زیر سقف یا داخل دیوار برود
+  camera.position.y = Math.max(12, camera.position.y);
   if (shake > 0) {
     camera.position.x += rand(-shake, shake);
     camera.position.y += rand(-shake, shake) * 0.6;
     camera.position.z += rand(-shake, shake);
     shake = Math.max(0, shake - dt * 2.2);
   }
-  camera.lookAt(camTarget.x, 0.8, camTarget.z);
+  camera.lookAt(camTarget);
   recoil = Math.max(0, recoil - dt * 3);
 
   updateEffects(dt);
@@ -1596,18 +1653,18 @@ function animate() {
 
   // برق اضطراری: چشمک قرمز
   const pulse = (Math.sin(t * 1.4) + 1) / 2;
-  emergency.intensity = pulse > 0.93 ? 30 : pulse > 0.86 ? 7 : 0;
+  emergency.intensity = pulse > 0.93 ? 70 : pulse > 0.86 ? 16 : 0;
   emergency.position.set(Math.sin(t * 0.11) * 9, 5, Math.cos(t * 0.13) * 7);
 
   // ---- چراغ‌قوه‌ها ----
   // نور بازیکن: اگر روشن است انرژی دارد، اگر خاموش است صفر
-  const targetI = lightState.on ? 26 : 0;
+  const targetI = lightState.on ? 55 : 0;
   wLight.spot.intensity += (targetI - wLight.spot.intensity) * Math.min(1, dt * 14);
   // لرزش خیلی کم نور همراه با حرکت (دست لرزان)
-  weaponLightGroup.position.x = (WEAPONS[player.weapon].kind === 'pistol' || WEAPONS[player.weapon].kind === 'melee' ? 0.16 : 0.3)
+  weaponLightGroup.position.x = (WEAPONS[player.weapon].kind === 'pistol' || WEAPONS[player.weapon].kind === 'melee' ? 0.20 : 0.34)
     + Math.sin(t * 6) * (joyMoving ? 0.035 : 0.014);
-  weaponLightGroup.position.y = 1.12 + Math.sin(t * 4.3) * 0.012;
-  wLight.halo.intensity += ((lightState.on ? 1.4 : 0) - wLight.halo.intensity) * Math.min(1, dt * 12);
+  weaponLightGroup.position.y = 1.43 + Math.sin(t * 4.3) * 0.012;
+  wLight.halo.intensity += ((lightState.on ? 6 : 0) - wLight.halo.intensity) * Math.min(1, dt * 12);
   selfGlow.visible = lightState.on;
 
   // چراغ‌قوه ai: سوات‌ها روشن، تروریست‌ها گاهی روشن می‌شوند
@@ -1629,6 +1686,7 @@ function animate() {
   if (player.alive && player.armor < player.maxArmor) player.armor = Math.min(player.maxArmor, player.armor + dt * 3);
 
   drawMinimap();
+  updateDebug(dt);
   renderer.render(scene, camera);
 }
 
