@@ -48,18 +48,20 @@ const WEAPONS = {
 const PLAYER_LOADOUT = ['Shotgun', 'Colt', 'Knife'];
 
 // هر تیم ترکیب و توانایی خودش را دارد
+// تیم سوات: سرباز واقعی با انیمیشن Idle/Run/Walk
 const SWAT_TEAM = [
-  { id: 'swat1', name: 'سوات ۱',    model: 'Swat',   gun: 'AR_1',     role: 'مهاجم',      hp: 100 },
-  { id: 'swat2', name: 'سوات ۲',    model: 'Worker', gun: 'SMG_1',    role: 'پشتیبان',    hp: 110 },
-  { id: 'swat3', name: 'سوات ۳',    model: 'Suit',   gun: 'Sniper_2', role: 'تک‌تیرانداز', hp: 90 },
-  { id: 'swat4', name: 'سوات ۴',    model: 'Casual', gun: 'Pistol_1', role: 'پزشک',       hp: 95 },
+  { id: 'swat1', name: 'سوات ۱', model: 'Soldier', gun: 'AR_1',     role: 'مهاجم',      hp: 100 },
+  { id: 'swat2', name: 'سوات ۲', model: 'Soldier', gun: 'SMG_1',    role: 'پشتیبان',    hp: 110 },
+  { id: 'swat3', name: 'سوات ۳', model: 'Soldier', gun: 'Sniper_2', role: 'تک‌تیرانداز', hp: 90 },
+  { id: 'swat4', name: 'سوات ۴', model: 'Soldier', gun: 'Pistol_1', role: 'پزشک',       hp: 95 },
 ];
+// تیم تروریست: ربات با ۱۴ انیمیشن (شامل Death و Punch)
 const TERROR_TEAM = [
-  { id: 'ter1', name: 'تروریست ۱', model: 'Punk',           gun: 'AR_3',     role: 'مهاجم',      hp: 105 },
-  { id: 'ter2', name: 'تروریست ۲', model: 'CyberCharacter', gun: 'SMG_2',    role: 'خرابکار',    hp: 95 },
-  { id: 'ter3', name: 'تروریست ۳', model: 'Spacesuit',      gun: 'Sniper_1', role: 'تک‌تیرانداز', hp: 100 },
-  { id: 'ter4', name: 'تروریست ۴', model: 'Casual2',        gun: 'Pistol_2', role: 'نفربر',      hp: 100 },
-  { id: 'ter5', name: 'تروریست ۵', model: 'Beach',          gun: 'AR_5',     role: 'مهاجم',      hp: 95 },
+  { id: 'ter1', name: 'تروریست ۱', model: 'Robot', gun: 'AR_3',     role: 'مهاجم',      hp: 105 },
+  { id: 'ter2', name: 'تروریست ۲', model: 'Robot', gun: 'SMG_2',    role: 'خرابکار',    hp: 95 },
+  { id: 'ter3', name: 'تروریست ۳', model: 'Robot', gun: 'Sniper_1', role: 'تک‌تیرانداز', hp: 100 },
+  { id: 'ter4', name: 'تروریست ۴', model: 'Robot', gun: 'Pistol_2', role: 'نفربر',      hp: 100 },
+  { id: 'ter5', name: 'تروریست ۵', model: 'Robot', gun: 'AR_5',     role: 'مهاجم',      hp: 95 },
 ];
 
 const ABILITY_CD = { grenade: 6, smoke: 12 };
@@ -139,62 +141,40 @@ function loadProp(cat, name, target, mode = 'height') {
 }
 
 // مدل کاراکتر: انیمیشن از شوالیه (ریگ یکسان) روی مدل تیم ریتارگت می‌شود
-let ANIM_SRC = null;
-function loadAnimSource() {
-  if (!ANIM_SRC) {
-    ANIM_SRC = loader.loadAsync('/models/anim/KnightCharacter.glb').then(g => g);
-  }
-  return ANIM_SRC;
-}
 
-// نگاشت استخوان‌های ریگ شوالیه → ریگ مدل‌های تیم
-const BONE_ALIAS = {
-  PalmL: 'HandL', PalmR: 'HandR', MiddleHandL: 'HandL', MiddleHandR: 'HandR',
-  FingersL: 'HandL', FingersR: 'HandR',
-  ThumbL: 'Thumb2L', Thumb2L: 'Thumb3L', ThumbR: 'Thumb2R', Thumb2R: 'Thumb3R',
+// ---------- کاراکترها: مدل و انیمیشن از خود فایل GLB ----------
+// Soldier.glb: Idle / Run / Walk  |  RobotExpressive.glb: ۱۴ انیمیشن
+const CHAR_FILES = {
+  Soldier: { path: '/models/chars/Soldier.glb', height: 1.8 },
+  Robot:   { path: '/models/chars/RobotExpressive.glb', height: 1.9 },
 };
-// انیمیشن را از ریگ شوالیه به ریگ کاراکتر تیم منتقل می‌کند (فقط چرخش‌ها)
-function remapClip(clip, root) {
-  const bones = new Set();
-  root.traverse(o => { if (o.isBone) bones.add(o.name); });
-  const tracks = [];
-  for (const t of clip.tracks) {
-    const dot = t.name.indexOf('.');
-    const node = t.name.slice(0, dot), prop = t.name.slice(dot + 1);
-    if (!prop.includes('quaternion')) continue;
-    const target = bones.has(node) ? node : BONE_ALIAS[node];
-    if (!target || !bones.has(target)) continue;
-    const nt = t.clone();
-    nt.name = `${target}.quaternion`;
-    tracks.push(nt);
-  }
-  return new THREE.AnimationClip(clip.name, clip.duration, tracks);
-}
 
-function loadCharacter(modelName, target = 1.8) {
-  return Promise.all([loadAnimSource(), loader.loadAsync(`/models/team/${modelName}.glb`)]).then(([animGltf, gltf]) => {
+function loadCharacter(key, target = 1.8) {
+  const info = CHAR_FILES[key];
+  return loader.loadAsync(info.path).then(gltf => {
     const root = gltf.scene;
-    root.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
+    root.traverse(o => {
+      if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; o.frustumCulled = false; }
+    });
     const b = bboxOf(root), s = b.getSize(new THREE.Vector3());
     root.scale.multiplyScalar(target / (s.y || 1));
     bboxOf(root);
-    // کاراکتر باید دقیقاً ۱.۸ متر باشد؛ اگر مدل عجیب بود، دوباره نرمال کن
     const hNow = bboxOf(root).getSize(new THREE.Vector3()).y;
-    if (Math.abs(hNow - target) > 0.35) root.scale.multiplyScalar(target / (hNow || 1));
+    if (Math.abs(hNow - target) > 0.4) root.scale.multiplyScalar(target / (hNow || 1));
     bboxOf(root);
     root.userData.baseY = -bboxOf(root).min.y;
+    root.userData.charKey = key;
 
     const mixer = new THREE.AnimationMixer(root);
     const actions = {};
-    for (const clip of animGltf.animations) {
-      const mapped = remapClip(clip, root);
-      if (mapped.tracks.length < 6) continue;
-      actions[clip.name] = mixer.clipAction(mapped);
-    }
+    for (const clip of gltf.animations) actions[clip.name] = mixer.clipAction(clip);
     root.userData.mixer = mixer;
     root.userData.actions = actions;
     root.userData.current = null;
     mixers.push(mixer);
+    // اولین انیمیشن ایستاده را پخش کن
+    const idle = findClip(gltf.animations, ['Idle', 'Standing']);
+    if (idle) { actions[idle.name].play(); root.userData.current = idle.name; }
     return root;
   });
 }
@@ -586,7 +566,7 @@ playerG.add(selfGlow);
 
 function setFlashlight(on) {
   lightState.on = on;
-  if (on) beep(1200, 0.04, 'square', 0.02); else beep(500, 0.05, 'square', 0.02);
+  playClick(on ? 0.7 : 0.5);
   updateHUD();
 }
 function toggleFlashlight() {
@@ -638,13 +618,25 @@ const gunPath = name => {
 
 async function attachGun(charRoot, gunName, offset) {
   const d = weaponDef(gunName);
-  const hand = findBone(charRoot, ['HandR', 'PalmR', 'Hand_R']);
+  // Soldier = ریگ Mixamo (mixamorig:RightHand) | Robot = Hand.R
+  // اسمها بعد از بارگذاری GLTFLoader پاک‌سازی می‌شوند: mixamorig:RightHand → mixamorigRightHand
+  const hand = findBone(charRoot, [
+    'mixamorigRightHand', 'mixamorig:RightHand', 'RightHand',
+    'Palm1R', 'Palm2R', 'HandR', 'Hand.R', 'Hand_R', 'PalmR', 'Palm.R',
+  ]);
   const off = offset || new THREE.Vector3(d.kind === 'pistol' ? 0.02 : 0.05, d.kind === 'melee' ? -0.02 : -0.1, 0.06);
   try {
     // اسلحه با بزرگ‌ترین بُعد نرمال می‌شود تا هرگز از دست بزرگ‌تر نشود
     const gun = await loadProp(d.cat, d.model, d.kind === 'melee' ? 0.55 : d.kind === 'pistol' ? 0.5 : 0.95, 'length');
     // جهت‌دهی لوله به سمت جلو (محور +Z کاراکتر) و کمی مایل به پایین
-    gun.rotation.set(0, Math.PI / 2, 0);
+    const isRobot = charRoot.userData?.charKey === 'Robot';
+    if (isRobot) {
+      gun.rotation.set(0, Math.PI / 2, 0);
+      gun.position.set(off.x, off.y + 0.02, off.z + 0.05);
+    } else {
+      gun.rotation.set(-0.15, Math.PI / 2, 0);
+      gun.position.copy(off);
+    }
     if (d.kind === 'melee') gun.rotation.set(Math.PI / 2, 0, Math.PI);
     gun.position.copy(off);
     const holder = new THREE.Group();
@@ -659,7 +651,7 @@ async function attachGun(charRoot, gunName, offset) {
 
 let playerGunHolder = null;
 async function buildPlayer() {
-  playerModel = await loadCharacter('Swat', 1.8);
+  playerModel = await loadCharacter('Soldier', 1.8);
   // در نمای از بالا کاراکتر باید کمی بزرگ‌تر دیده شود
   tintCharacter(playerModel, 'swat');
   playerModel.position.y = 0;
@@ -750,7 +742,7 @@ async function spawnActor(def, team, pos) {
   g.position.set(pos.x, FLOOR_Y, pos.z);
   g.rotation.y = team === 'swat' ? 0 : Math.PI;
   scene.add(g);
-  const model = await loadCharacter(def.model, 1.8);
+  const model = await loadCharacter(def.model, def.model === 'Robot' ? 1.9 : 1.8);
   tintCharacter(model, team);
   model.position.y = 0;
   g.add(model);
@@ -866,7 +858,7 @@ function raycastShot(origin, dir, range, myTeam) {
 function playerShoot() {
   const w = WEAPONS[player.weapon];
   if (!player.alive || player.cd > 0 || player.reload > 0) return;
-  if (w.kind !== 'melee' && player.mag <= 0) { startReload(); return; }
+  if (w.kind !== 'melee' && player.mag <= 0) { playClick(1.3); startReload(); return; }
   player.cd = w.cd;
   if (w.kind !== 'melee') player.mag--;
   updateHUD();
@@ -888,7 +880,7 @@ function playerShoot() {
       if (diff < 1.15) { damageActor(a, w.dmg, playerActor); hitAny = true; hitmarker(); }
     }
     slashArc(w.range, aimAngle, hitAny);
-    beep(hitAny ? 900 : 420, 0.06, 'triangle', 0.03);
+    playClick(hitAny ? 1.4 : 0.8);   // ضربه چاقو: کلیک فلزی، نه صدای شلیک
     recoil = 0.7;
     return;
   }
@@ -909,7 +901,7 @@ function playerShoot() {
     } else spawnSpark(hit.point);
   }
   if (anyHit) hitmarker();
-  beep(w.kind === 'shotgun' ? 110 : w.kind === 'pistol' ? 260 : 620, w.kind === 'shotgun' ? 0.16 : 0.05, 'square', w.kind === 'shotgun' ? 0.06 : 0.03);
+  if (w.kind !== 'melee') playShot(w.kind, 0, 1);
   popLight(origin.clone().addScaledVector(fwd, 0.7), w.kind === 'shotgun' ? 26 : 14, 0.08);
   recoil = w.kind === 'shotgun' ? 1.4 : 0.55;
   if (w.scope) startReload(true);
@@ -934,7 +926,7 @@ function startReload(quick = false) {
   if (w.kind === 'melee' || player.reload > 0 || player.mag === w.mag) return;
   player.reload = quick ? Math.min(0.8, w.reloadTime) : (w.reloadTime || 1.4);
   toast('🔄 خشاب عوض می‌شود…');
-  beep(260, 0.1, 'sine', 0.02);
+  playReload();
 }
 
 function updateAI(a, dt) {
@@ -962,7 +954,7 @@ function updateAI(a, dt) {
   }
   if (!a.target) {
     // در تاریکی سرگردان می‌شود (بدون دید واقعی)
-    playAnim(a.model, ['Idle_Neutral', 'Idle'], 0.2);
+    playAnim(a.model, ['Idle', 'Standing'], 0.2);
     if (a.wanderCd === undefined) a.wanderCd = rand(0.5, 2);
     a.wanderCd -= dt;
     if (a.wanderCd <= 0) {
@@ -977,7 +969,7 @@ function updateAI(a, dt) {
       const before = a.g.position.clone();
       resolveCollision(a.g.position, 0.55);
       if (a.g.position.distanceTo(before) < step * 0.3) a.wanderDir = rand(-Math.PI, Math.PI);
-      playAnim(a.model, ['Walk'], 0.2);
+      playAnim(a.model, ['Walk', 'Walking'], 0.2);
     }
     return;
   }
@@ -1012,7 +1004,7 @@ function updateAI(a, dt) {
     resolveCollision(a.g.position, 0.55);
     moving = true;
   }
-  playAnim(a.model, moving ? ['Run', 'Walk'] : ['Idle_Gun_Pointing', 'Idle_Neutral', 'Idle'], 0.16);
+  playAnim(a.model, moving ? ['Run', 'Running', 'Walk', 'Walking'] : ['Idle', 'Standing'], 0.16);
 
   if (seen && d < a.range && a.fireCd <= 0) {
     a.fireCd = a.fireRate * rand(0.8, 1.3);
@@ -1028,8 +1020,9 @@ function updateAI(a, dt) {
     const miss = target.clone().add(new THREE.Vector3(rand(-2.6, 2.6), rand(-0.4, 1.6), rand(-2.6, 2.6)));
     spawnTracer(origin, Math.random() < hitChance ? target : miss, a.team, 0.05);
     if (Math.random() < hitChance) damageActor(a.target, a.dmg * rand(0.8, 1.2), a);
-    playAnim(a.model, ['Run_Shoot', 'Idle_Gun_Shoot', 'Gun_Shoot', 'Attack'], 0.06);
-    beep(rand(420, 680), 0.035, 'square', 0.012);
+    playAnim(a.model, ['Punch', 'Attack'], 0.06);
+    const ek = WEAPONS[a.def.gun]?.kind || 'rifle';
+    playShot(ek === 'melee' ? 'rifle' : ek, flatDist(a.g.position, playerG.position), 0.85);
   }
 }
 
@@ -1059,7 +1052,7 @@ async function throwGrenade(kind) {
   to.x = clamp(to.x, -HW + 2, HW - 2);
   to.z = clamp(to.z, -HH + 2, HH - 2);
   grenades.push({ g, from: g.position.clone(), to, t: 0, dur: 0.8, kind });
-  beep(220, 0.1, 'triangle', 0.03);
+  playClick(0.9);
 }
 
 function explode(pos, radius, dmg, ownerTeam) {
@@ -1088,7 +1081,7 @@ function explode(pos, radius, dmg, ownerTeam) {
       damageActor(a, dmg2, ownerTeam === 'swat' ? playerActor : null);
     }
   }
-  beep(70, 0.42, 'sawtooth', 0.1);
+  playExplosion(flatDist(pos, playerG.position));
   shake = Math.max(shake, 0.55);
 }
 
@@ -1106,7 +1099,7 @@ function spawnSmoke(pos, radius = 4.4, duration = 16) {
   }
   scene.add(group);
   smokes.push({ group, puffs, radius, life: duration, max: duration });
-  beep(140, 0.35, 'sine', 0.05);
+  playSmoke();
 }
 const inSmoke = pos => smokes.some(s => flatDist(s.group.position, pos) < s.radius);
 
@@ -1379,7 +1372,7 @@ const GALLERY_NAMES = {
   Sniper_1: 'تک‌تیرانداز ۱', Sniper_2: 'تک‌تیرانداز ۲', Grenade_1: 'نارنجک', Grenade_2: 'نارنجک دود',
 };
 const GALLERY = [
-  { cat: 'team', title: '🧍 کاراکترهای تیم‌ها', list: ['Swat', 'Worker', 'Suit', 'Casual', 'Punk', 'CyberCharacter', 'Spacesuit', 'Casual2', 'Beach', 'Adventurer'] },
+  { cat: 'team', title: '🧍 کاراکترها (مدل + انیمیشن)', list: ['Soldier', 'Robot'] },
   { cat: 'weapons2', title: '🔫 اسلحه‌های بازیکن (سنگین/کلت/چاقو)', list: ['Shotgun_1', 'Shotgun_2', 'Shotgun_SawedOff', 'Shotgun_ShortStock', 'Revolver_1', 'Revolver_2', 'Revolver_3', 'Pistol_1', 'Pistol_2', 'Knife', 'Torch'] },
   { cat: 'guns', title: '🔫 سلاح‌های تیم‌ها و نارنجک', list: ['AR_1', 'AR_3', 'AR_5', 'SMG_1', 'SMG_2', 'Pistol_1', 'Sniper_1', 'Sniper_2', 'Grenade_1', 'Grenade_2'] },
   { cat: 'office', title: '🏢 ساختمان شرکت', list: ['FloorTile_Basic', 'Wall_1', 'Wall_4', 'DoorSingle_Wall_SideA', 'Door_Double', 'Window_Wall_SideA', 'Column_1', 'Staircase', 'RoofTile_Plate'] },
@@ -1426,7 +1419,7 @@ function openGallery() {
   galleryOpen = true; closeBoard();
   document.getElementById('gallery').classList.add('open');
   pedestal.visible = true; gSpot.visible = true;
-  showInGallery('team', 'Swat');
+  showInGallery('team', 'Soldier');
 }
 function closeGallery() {
   galleryOpen = false;
@@ -1448,6 +1441,13 @@ document.getElementById('galleryBtn').onclick = openGallery;
 document.getElementById('gclose').onclick = closeGallery;
 document.getElementById('boardBtn').onclick = () => { closeGallery(); toggleBoard(); };
 document.getElementById('boardClose').onclick = toggleBoard;
+const muteBtn = document.getElementById('muteBtn');
+if (muteBtn) muteBtn.onclick = () => {
+  initAudio();
+  audio.muted = !audio.muted;
+  muteBtn.textContent = audio.muted ? '🔇' : '🔊';
+  toast(audio.muted ? '🔇 صدا خاموش' : '🔊 صدا روشن');
+};
 
 let gDrag = false, gLast = { x: 0, y: 0 };
 renderer.domElement.addEventListener('pointerdown', e => {
@@ -1463,19 +1463,187 @@ addEventListener('pointermove', e => {
 addEventListener('pointerup', () => gDrag = false);
 addEventListener('wheel', e => { if (galleryOpen) gDist = clamp(gDist + e.deltaY * 0.012, 3.5, 18); }, { passive: true });
 
-/* ----------------------------- صدا ----------------------------- */
-let AC = null;
-function beep(freq, dur = 0.06, type = 'square', vol = 0.03) {
-  try {
-    AC = AC || new (window.AudioContext || window.webkitAudioContext)();
-    const o = AC.createOscillator(), g = AC.createGain();
-    o.type = type; o.frequency.value = freq;
-    g.gain.setValueAtTime(vol, AC.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0006, AC.currentTime + dur);
-    o.connect(g).connect(AC.destination);
-    o.start(); o.stop(AC.currentTime + dur);
-  } catch { }
+/* ============================ صدا ============================ */
+// صداهای واقعی ضبط‌شده (CC0) — از پک firearm_sfx:
+// public/audio/shot_rifle.wav, shot_pistol.wav, shot_shotgun.wav, shot_sniper.wav
+const audio = {
+  ctx: null, master: null, ready: false, muted: false,
+  buffers: {},          // نمونه‌های رمزگشایی‌شده
+  loading: null,
+};
+
+const AUDIO_FILES = {
+  rifle:   ['/audio/shot_rifle.wav', '/audio/shot_rifle2.wav'],
+  pistol:  ['/audio/shot_pistol.wav'],
+  shotgun: ['/audio/shot_shotgun.wav'],
+  sniper:  ['/audio/shot_sniper.wav'],
+};
+
+function initAudio() {
+  if (audio.ctx) return audio.ctx;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  audio.ctx = new AC();
+  audio.master = audio.ctx.createGain();
+  audio.master.gain.value = 0.5;
+  // محدودکننده سبک تا صدای شلیک تیز و آزاردهنده نباشد
+  const comp = audio.ctx.createDynamicsCompressor();
+  comp.threshold.value = -14; comp.knee.value = 22; comp.ratio.value = 7;
+  comp.attack.value = 0.002; comp.release.value = 0.22;
+  audio.master.connect(comp).connect(audio.ctx.destination);
+  audio.ready = true;
+  return audio.ctx;
 }
+
+// بارگذاری نمونه‌های واقعی (یک‌بار)
+function loadSamples() {
+  initAudio();
+  if (!audio.ctx) return Promise.resolve(false);
+  if (audio.loading) return audio.loading;
+  audio.loading = Promise.all(
+    Object.entries(AUDIO_FILES).map(([key, urls]) =>
+      Promise.all(urls.map(u =>
+        fetch(u).then(r => r.arrayBuffer()).then(b => audio.ctx.decodeAudioData(b))
+          .catch(() => null)
+      )).then(bufs => { audio.buffers[key] = bufs.filter(Boolean); })
+    )
+  ).then(() => {
+    const ok = Object.keys(audio.buffers).filter(k => audio.buffers[k].length);
+    console.log('🔊 نمونه‌های صوتی واقعی بارگذاری شد:', ok.join(', '));
+    return ok.length > 0;
+  }).catch(() => false);
+  return audio.loading;
+}
+
+// مرورگر تا اولین کلیک/لمس اجازه پخش نمی‌دهد
+for (const ev of ['pointerdown', 'keydown', 'touchstart']) {
+  addEventListener(ev, () => {
+    initAudio();
+    if (audio.ctx?.state === 'suspended') audio.ctx.resume();
+    loadSamples();
+  }, { once: true });
+}
+
+/* —— پخش شلیک واقعی —— */
+// dist: فاصله شنونده تا منبع (متر)  |  volume: شدت نسبی
+function playShot(kind = 'rifle', dist = 0, volume = 1) {
+  if (!audio.ready || audio.muted) return;
+  const ctx = audio.ctx;
+  const set = audio.buffers[kind] || audio.buffers.rifle;
+  if (!set || !set.length) return;
+
+  // افت شدت در فضای بسته: صدا از دیوار عبور می‌کند ولی گل می‌کند
+  const atten = Math.max(0.04, 1 / (1 + Math.pow(dist / 8, 1.6))) * volume;
+  if (atten < 0.02) return;
+
+  const src = ctx.createBufferSource();
+  // تنوع: هر بار یکی از نمونه‌ها به‌صورت تصادفی + پیچ تصادفی خفیف
+  src.buffer = set[(Math.random() * set.length) | 0];
+  src.playbackRate.value = 0.94 + Math.random() * 0.12;
+
+  // فاصله = کم‌کردن بم و افت شدت (هوای شرکت)
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = dist > 4 ? Math.max(900, 14000 - dist * 900) : 16000;
+
+  const g = ctx.createGain();
+  g.gain.value = atten * 0.95;
+
+  src.connect(lp).connect(g).connect(audio.master);
+  src.start(ctx.currentTime + Math.random() * 0.01);
+  setTimeout(() => { try { src.disconnect(); lp.disconnect(); g.disconnect(); } catch (_) {} }, 3000);
+}
+
+/* —— خشاب خالی / کلیک فلزی (سنتز کوتاه، چون ضبط جدا لازم نیست) —— */
+let clickBuf = null;
+function makeClickBuf() {
+  const ctx = audio.ctx, sr = ctx.sampleRate, len = Math.floor(sr * 0.055);
+  const b = ctx.createBuffer(1, len, sr), d = b.getChannelData(0);
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    const env = Math.exp(-t * 95);
+    // چند مؤلفه فلزی + نویز
+    d[i] = env * (Math.sin(2 * Math.PI * 2600 * t) * 0.5 +
+                  Math.sin(2 * Math.PI * 4100 * t) * 0.3 +
+                  (Math.random() * 2 - 1) * 0.55);
+  }
+  return b;
+}
+function playClick(strength = 1) {
+  if (!audio.ready || audio.muted) return;
+  const ctx = audio.ctx;
+  if (!clickBuf) clickBuf = makeClickBuf();
+  const src = ctx.createBufferSource();
+  src.buffer = clickBuf;
+  src.playbackRate.value = 0.9 + Math.random() * 0.25;
+  const g = ctx.createGain();
+  g.gain.value = 0.22 * strength;
+  src.connect(g).connect(audio.master);
+  src.start();
+}
+
+/* —— تعویض خشاب: دو کلیک + سُرخوردن فلز —— */
+function playReload() {
+  if (!audio.ready || audio.muted) return;
+  playClick(1.2);
+  setTimeout(() => playClick(0.9), 280);
+  setTimeout(() => playClick(0.55), 560);
+}
+
+/* —— انفجار نارنجک: نمونه بم ضبط‌شده + تقویت پایین —— */
+function playExplosion(dist = 0) {
+  if (!audio.ready || audio.muted) return;
+  const ctx = audio.ctx;
+  const base = (audio.buffers.shotgun || audio.buffers.rifle || [])[0];
+  if (!base) return;
+  const atten = Math.max(0.15, 1 / (1 + dist / 12));
+
+  const src = ctx.createBufferSource();
+  src.buffer = base;
+  src.playbackRate.value = 0.32;           // کشیدن صدا به پایین = انفجار
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 420;
+  const g = ctx.createGain();
+  g.gain.value = atten * 1.5;
+  src.connect(lp).connect(g).connect(audio.master);
+  src.start();
+
+  // لرزش بم اضافی
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(85, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(26, ctx.currentTime + 0.55);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.5 * atten, ctx.currentTime);
+  og.gain.exponentialRampToValueAtTime(0.0008, ctx.currentTime + 0.7);
+  osc.connect(og).connect(audio.master);
+  osc.start(); osc.stop(ctx.currentTime + 0.75);
+  setTimeout(() => { try { src.disconnect(); lp.disconnect(); g.disconnect(); } catch (_) {} }, 2500);
+}
+
+/* —— دود: هیس نویزی —— */
+function playSmoke() {
+  if (!audio.ready || audio.muted) return;
+  const ctx = audio.ctx, sr = ctx.sampleRate, len = Math.floor(sr * 2.4);
+  const buf = ctx.createBuffer(1, len, sr), d = buf.getChannelData(0);
+  let prev = 0;
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    const env = Math.min(1, t / 0.3) * Math.exp(-t / 0.85);
+    // نویز صورتی تقریبی (فیلتر یک‌قطبی)
+    prev = prev * 0.85 + (Math.random() * 2 - 1) * 0.15;
+    d[i] = prev * env * 1.6;
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass'; hp.frequency.value = 1600;
+  const g = ctx.createGain(); g.gain.value = 0.5;
+  src.connect(hp).connect(g).connect(audio.master);
+  src.start();
+}
+
+function beep() { }
 
 /* --------------------------- شروع دور --------------------------- */
 // اگر نقطه‌ای داخل دیوار بود، نزدیک‌ترین خانه آزاد را برمی‌گرداند
@@ -1661,7 +1829,7 @@ function updateDebug(dt) {
     `بازیگران زنده: ${alive}  |  خشاب: ${player.mag}\n` +
     `مه: ${scene.fog ? scene.fog.density : 'خاموش'}  |  نقاط نور: ${lightsInScene()}\n` +
     `روشنایی محیط: ${ambientLight.intensity.toFixed(2)}  بالاسری: ${overhead.intensity.toFixed(2)}\n` +
-    `ارتفاع بازیکن: ${playerG.position.y.toFixed(2)}  |  قفل: ${document.pointerLockElement ? 'بله' : 'خیر'}\n` +
+    `ارتفاع بازیکن: ${playerG.position.y.toFixed(2)}  |  صدا: ${audio.ready ? (audio.muted ? 'بی‌صدا' : 'روشن') : 'منتظر کلیک'}\n` +
     `بزرگ‌ترین اجسام:\n              ${biggestObjects(3)}`;
 }
 
@@ -1727,7 +1895,7 @@ function animate() {
       if (p) aimAngle = Math.atan2(p.x - playerG.position.x, p.z - playerG.position.z);
     }
     playerG.rotation.y = aimAngle;
-    playAnim(playerModel, joyMoving ? ['Run', 'Walk'] : ['Idle_Gun_Pointing', 'Idle_Neutral', 'Idle'], 0.16);
+    playAnim(playerModel, joyMoving ? ['Run', 'Walk'] : ['Idle', 'Standing'], 0.16);
     ensureIdle(playerModel);
     if (playerModel?.userData.mixer) playerModel.userData.mixer.timeScale = joyMoving ? 1.15 : 1;
   }
@@ -1820,7 +1988,7 @@ function animate() {
 }
 
 /* ----------------------------- اجرا ----------------------------- */
-const BUILD_VERSION = 'v7-camera-clamped';
+const BUILD_VERSION = 'v8-real-assets';
 
 (async function init() {
   const msg = document.getElementById('loadmsg');
