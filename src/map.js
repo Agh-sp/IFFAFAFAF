@@ -154,21 +154,12 @@ export const FURNITURE = (() => {
     const plant = place(cellX(c1), cellZ(r1), room);
     if (plant) items.push({ n: 'Houseplant_1', x: plant.x, z: plant.z, r: 0, s: 1.2 });
 
-    // چراغ سقفی بالای مرکز اتاق (روی سقف، اثری روی مسیر ندارد)
-    items.push({ n: 'Light_Ceiling1', x: X, z: Z, r: 0, s: 1.0, ceiling: 3.6 });
+    // سقف در نقشه وجود ندارد، پس چراغ سقفی هم لازم نیست
+    // (قبلاً به‌صورت شناور بالای دیوارها دیده می‌شد)
   }
 
-  // راهروها: قطعات تزئینی چسبیده به دیوار، نه وسط مسیر
-  const corridorProps = [
-    ['Kitchen_Fridge', 1, 8], ['Trashcan_Cylindric', 13, 9],
-    ['Trashcan_Cylindric', 24, 18], ['Kitchen_Cabinet1', 31, 17],
-  ];
-  for (const [n, c, r] of corridorProps) {
-    const x = cellX(c), z = cellZ(r);
-    if (GRID[r][c] !== WALL) continue;    // فقط اگر آن خانه دیوار است (چسبیده به دیوار)
-    const back = place(x, z, ROOMS[0]);   // جای‌گذاری با اعتبارسنجی
-    if (back) items.push({ n, x: back.x, z: back.z, r: 0, s: 1.7 });
-  }
+  // راهروها عمداً خالی نگه داشته می‌شوند: هر قطعه‌ای در راهرو
+  // مسیر بات‌ها را تنگ می‌کند و باعث گیر کردنشان می‌شود.
 
   return items;
 })();

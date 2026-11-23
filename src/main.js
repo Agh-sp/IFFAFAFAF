@@ -2002,7 +2002,7 @@ function animate() {
 }
 
 /* ----------------------------- اجرا ----------------------------- */
-const BUILD_VERSION = 'v10-newmap';
+const BUILD_VERSION = 'v11-clean';
 
 (async function init() {
   const msg = document.getElementById('loadmsg');
