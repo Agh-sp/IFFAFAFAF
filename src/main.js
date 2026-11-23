@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import {
-  TILE, COLS, ROWS, HW, HH, GRID, FLOOR, WALL,
-  ROOMS, cellCenter, cellX, cellZ, world, isWall, cellOf, roomAt, FURNITURE, PLAN,
+  TILE, COLS, ROWS, HW, HH, GRID, FLOOR, WALL, WORLD_W, WORLD_D,
+  ROOMS, SPAWNS, cellCenter, cellX, cellZ, world, isWall, cellOf, roomAt, FURNITURE, PLAN,
 } from './map.js';
 
 /* =====================================================================
@@ -14,6 +14,10 @@ import {
 
 
 const IS_TOUCH = 'ontouchstart' in window;
+// ⚠️ مدل‌های Soldier و Xbot رو به -Z ساخته شده‌اند (پنجه‌پا z منفی).
+// فرمول چرخش سه‌جی‌اس فرض می‌کند مدل رو به +Z است، پس ۱۸۰ درجه
+// تصحیح لازم است؛ وگرنه کاراکتر برعکس حرکت می‌کند («چپ میرم راست میره»).
+const MODEL_YAW_OFFSET = 0;  // مدل‌های blocky رو به +Z هستند
 const FLOOR_Y = 0.09;   // ارتفاع سطح کاشی کف
 
 const clamp = THREE.MathUtils.clamp;
@@ -52,18 +56,18 @@ const PLAYER_LOADOUT = ['Shotgun', 'Colt', 'Knife'];
 // هر تیم ترکیب و توانایی خودش را دارد
 // تیم سوات: سرباز واقعی با انیمیشن Idle/Run/Walk
 const SWAT_TEAM = [
-  { id: 'swat1', name: 'سوات ۱', model: 'Soldier', gun: 'AR_1',     role: 'مهاجم',      hp: 100 },
-  { id: 'swat2', name: 'سوات ۲', model: 'Soldier', gun: 'SMG_1',    role: 'پشتیبان',    hp: 110 },
-  { id: 'swat3', name: 'سوات ۳', model: 'Soldier', gun: 'Sniper_2', role: 'تک‌تیرانداز', hp: 90 },
-  { id: 'swat4', name: 'سوات ۴', model: 'Soldier', gun: 'Pistol_1', role: 'پزشک',       hp: 95 },
+  { id: 'swat1', name: 'سوات ۱', model: 'Hero', gun: 'AR_1',     role: 'مهاجم',      hp: 100 },
+  { id: 'swat2', name: 'سوات ۲', model: 'Hero', gun: 'SMG_1',    role: 'پشتیبان',    hp: 110 },
+  { id: 'swat3', name: 'سوات ۳', model: 'Hero', gun: 'Sniper_2', role: 'تک‌تیرانداز', hp: 90 },
+  { id: 'swat4', name: 'سوات ۴', model: 'Hero', gun: 'Pistol_1', role: 'پزشک',       hp: 95 },
 ];
 // تیم تروریست: ربات با ۱۴ انیمیشن (شامل Death و Punch)
 const TERROR_TEAM = [
-  { id: 'ter1', name: 'تروریست ۱', model: 'Xbot', gun: 'AR_3',     role: 'مهاجم',      hp: 105 },
-  { id: 'ter2', name: 'تروریست ۲', model: 'Xbot', gun: 'SMG_2',    role: 'خرابکار',    hp: 95 },
-  { id: 'ter3', name: 'تروریست ۳', model: 'Xbot', gun: 'Sniper_1', role: 'تک‌تیرانداز', hp: 100 },
-  { id: 'ter4', name: 'تروریست ۴', model: 'Xbot', gun: 'Pistol_2', role: 'نفربر',      hp: 100 },
-  { id: 'ter5', name: 'تروریست ۵', model: 'Xbot', gun: 'AR_5',     role: 'مهاجم',      hp: 95 },
+  { id: 'ter1', name: 'تروریست ۱', model: 'Robot', gun: 'AR_3',     role: 'مهاجم',      hp: 105 },
+  { id: 'ter2', name: 'تروریست ۲', model: 'Robot', gun: 'SMG_2',    role: 'خرابکار',    hp: 95 },
+  { id: 'ter3', name: 'تروریست ۳', model: 'Robot', gun: 'Sniper_1', role: 'تک‌تیرانداز', hp: 100 },
+  { id: 'ter4', name: 'تروریست ۴', model: 'Robot', gun: 'Pistol_2', role: 'نفربر',      hp: 100 },
+  { id: 'ter5', name: 'تروریست ۵', model: 'Robot', gun: 'AR_5',     role: 'مهاجم',      hp: 95 },
 ];
 
 const ABILITY_CD = { grenade: 6, smoke: 12 };
@@ -94,10 +98,10 @@ camera.position.set(0, 26, 16);
 // چراغ‌های اضطراری باقی‌مانده چیزی را روشن می‌کنند.
 // نور محیطی «خیلی کم ولی کافی»: بدون این، کل صفحه سیاه مطلق می‌شود
 // و بازیکن حتی زمین زیر پایش را نمی‌بیند. تاریکی از کم بودنش می‌آید، نه از صفر بودنش.
-const ambientLight = new THREE.AmbientLight(0x6b7f96, 1.55);
+const ambientLight = new THREE.AmbientLight(0x8fa6c0, 2.1);
 scene.add(ambientLight);
 // نور عمودی کم‌سو از بالا: بدون این، دیوارها و کف کاملاً تخت و سیاه می‌شوند
-const overhead = new THREE.DirectionalLight(0x9fb6d4, 0.95);
+const overhead = new THREE.DirectionalLight(0xc8dcf6, 1.5);
 overhead.position.set(8, 40, 12);
 scene.add(overhead);
 
@@ -154,9 +158,10 @@ function loadProp(cat, name, target, mode = 'height') {
 
 // ---------- کاراکترها: مدل و انیمیشن از خود فایل GLB ----------
 const CHAR_FILES = {
-  Soldier: { path: '/models/chars/Soldier.glb', height: 1.8 },  // سرباز سوات
-  Xbot:    { path: '/models/chars/Xbot.glb',    height: 1.8 },  // تروریست (ریگ Mixamo)
+  Hero:  { path: '/models/chars/blocky_01_hero.glb',  height: 1.8 },  // تیم سوات
+  Robot: { path: '/models/chars/blocky_08_robot.glb', height: 1.9 },  // تیم تروریست
 };
+// هر دو مدل ۱۰ انیمیشن واقعی دارند: idle/walk/run/punch/death/wave/jump/fall/cheer/dance
 
 /* کاراکترها: هر فایل GLB فقط یک‌بار بارگذاری می‌شود و با SkeletonUtils کلون می‌شود.
    Soldier.glb → سرباز (Idle/Run/Walk/TPose)
@@ -438,7 +443,7 @@ function followPath(a, speed, dt) {
   const step = Math.min(speed * dt, d);
   a.g.position.x += (dx / d) * step;
   a.g.position.z += (dz / d) * step;
-  a.g.rotation.y = Math.atan2(dx, dz);
+  a.g.rotation.y = Math.atan2(dx, dz) + MODEL_YAW_OFFSET;
   return true;
 }
 
@@ -494,43 +499,43 @@ function instancedFrom(gltf, placements, target, mode = 'footprint', opts = {}) 
   return im;
 }
 
-async function buildShell() {
-  const floorA = [], floorB = [], wallA = [], wallB = [], wallTall = [];
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      const { x, z } = world(c, r);
-      if (grid[r][c] === F) {
-        (Math.random() < 0.22 ? floorB : floorA).push({ x, z, rot: 0 });
-      } else {
-        if (Math.random() < 0.18) wallTall.push({ x, z, rot: 0 });
-        else (Math.random() < 0.3 ? wallB : wallA).push({ x, z, rot: 0 });
-        WALL_SEGS.push({ x, z });
-      }
-    }
-  }
-  const load = n => loader.loadAsync(`/models/office/${n}.glb`);
-  const [fA, fB, wA, wB, wT] = await Promise.all([
-    load('FloorTile_Basic'), load('FloorTile_Basic2'), load('Wall_1'), load('Wall_2'), load('Wall_4'),
-  ]);
-  instancedFrom(fA, floorA, TILE);
-  instancedFrom(fB, floorB, TILE);
-  // دیوارها با ارتفاع کنترل‌شده ساخته می‌شوند تا دوربین از بالا دید کامل داشته باشد
-  // ⚠️ دیوارها نیمه‌شفاف نمی‌شوند: با depthWrite=false ترتیب رسم تصادفی
-  // می‌شود و دیوارها از داخل هم دیده می‌شوند (همان «باگ نامرئی‌شدن»).
-  // به‌جایش دیوارها کامل مات‌اند و فقط ارتفاعشان محدود است تا دوربین از بالا ببیند.
-  const walls = [
-    instancedFrom(wA, wallA, TILE, 'footprint'),
-    instancedFrom(wB, wallB, TILE, 'footprint'),
-    instancedFrom(wT, wallTall, TILE, 'footprint'),
-  ];
-  for (const im of walls) {
-    im.geometry.computeBoundingBox();
-    const h = im.geometry.boundingBox.max.y;
-    if (h > 2.0) { im.scale.y = 2.0 / h; im.updateMatrix?.(); }
-    im.material.depthWrite = true;
-    im.material.transparent = false;
-    im.material.opacity = 1;
-    im.material.needsUpdate = true;
+/* ------------------------- ساخت زمین ------------------------- */
+// زمین صاف و یکدست. هیچ دیواری نیست تا اول انجین (حرکت/دوربین/شلیک) درست شود.
+function buildShell() {
+  const W = WORLD_W, D = WORLD_D;
+
+  // کف: یک صفحه‌ی بزرگ با بافت کاشی
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: 0x2a3440, roughness: 0.92, metalness: 0.02,
+  });
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = 0;
+  floor.receiveShadow = true;
+  scene.add(floor);
+
+  // خطوط شبکه‌ی ملایم تا حرکت و مقیاس دیده شود
+  const gridHelper = new THREE.GridHelper(Math.max(W, D), Math.max(W, D) / TILE, 0x3d4d61, 0x333f4f);
+  gridHelper.position.y = 0.012;
+  gridHelper.material.transparent = true;
+  gridHelper.material.opacity = 0.55;
+  scene.add(gridHelper);
+
+  // نشانه‌ی مرکز زمین
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(7.4, 7.6, 64),
+    new THREE.MeshBasicMaterial({ color: 0x4a86c8, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.02;
+  scene.add(ring);
+
+  // چهار ستون راهنما در گوشه‌ها (فقط برای درک جهت و مقیاس)
+  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x39485a, roughness: 0.8 });
+  for (const [x, z] of [[-W/2 + 2, -D/2 + 2], [W/2 - 2, -D/2 + 2], [-W/2 + 2, D/2 - 2], [W/2 - 2, D/2 - 2]]) {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(1.2, 3.2, 1.2), pillarMat);
+    p.position.set(x, 1.6, z);
+    scene.add(p);
   }
 }
 
@@ -540,28 +545,8 @@ async function buildShell() {
 // مختصات بر اساس ROOMS (ردیف/ستون) محاسبه شده تا با نقشه هم‌تراز باشد.
 // مبلمان از src/map.js می‌آید (هم‌تراز با اتاق‌ها)
 
-async function buildFurniture() {
-  await Promise.all(FURNITURE.map(async f => {
-    try {
-      const m = await loadProp('office', f.n, f.s, f.mode || 'height');
-      m.rotation.y = f.r || 0;
-      m.position.set(f.x, 0, f.z);
-      if (f.flat) m.position.y = FLOOR_Y + 0.015;
-      else if (f.ceiling) m.position.y = f.ceiling;
-      else m.position.y += m.userData.baseY + FLOOR_Y;
-      if (f.onWall) m.position.y = f.wallOffset || 0.5;
-      // اگر مدل هنوز غیرمنطقی بزرگ است، اصلاً نمایش نده (جلوگیری از پوشاندن صفحه)
-      const sizeNow = bboxOf(m).getSize(new THREE.Vector3());
-      if (sizeNow.y > MAX_PROP_HEIGHT + 0.5 || Math.max(sizeNow.x, sizeNow.z) > 12) {
-        console.warn('مدل خیلی بزرگ، حذف شد:', f.n, sizeNow.toArray().map(v => v.toFixed(1)));
-        scene.remove(m);
-        return;
-      }
-      scene.add(m);
-      if (!f.flat && !f.ceiling) PROP_COLLIDERS.push({ x: f.x, z: f.z, r: f.s * 0.28 });
-    } catch (e) { console.warn('furniture', f.n, e); }
-  }));
-}
+// زمین خالی است: هیچ مبلمانی ساخته نمی‌شود.
+async function buildFurniture() { }
 
 /* ---------------------- نورها (بودجه محدود) ---------------------- */
 const flashPool = [];
@@ -576,21 +561,9 @@ function popLight(pos, peak = 16, life = 0.09, color = 0xffc07a) {
   f.l.position.copy(pos); f.l.color.setHex(color);
   f.peak = peak; f.life = life; f.max = life;
 }
-const emergency = new THREE.PointLight(0xff2b2b, 0, 34, 2);
-emergency.position.set(0, 5, 0); scene.add(emergency);
 
-// چراغ‌های اضطراری باتری‌خور: خیلی کم‌سو و کوچک، فقط برای جهت‌یابی در راهروها
-const EMERGENCY_LAMPS = [
-  [-22, -14], [0, -16], [22, -15], [-20, 16], [0, 17], [21, 16], [-10, 0], [12, 0],
-];
-for (const [x, z] of EMERGENCY_LAMPS) {
-  const l = new THREE.PointLight(0xd8452f, 2.6, 7, 1.6);
-  l.position.set(x, 3.2, z);
-  scene.add(l);
-  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff7a5a }));
-  bulb.position.set(x, 3.4, z);
-  scene.add(bulb);
-}
+// روی زمین صاف و خالی، چند نور محیطی ملایم برای دیدن اجسام کافی است.
+// (چراغ‌های اضطراری قبلی به اتاق‌های نقشه‌ی ساختمانی وابسته بودند.)
 
 /* --------------------------- بازیکن --------------------------- */
 const player = {
@@ -603,6 +576,7 @@ const playerG = new THREE.Group();
 scene.add(playerG);
 let playerModel = null;
 let aimAngle = 0;
+let mouseActive = false;
 
 /* -------- چراغ‌قوه‌ی سوار بر اسلحه --------
    مخروط نور دقیقاً جلوی دهانه اسلحه را روشن می‌کند.
@@ -779,7 +753,7 @@ function layoutGun(h, dt = 0.016) {
 
 let playerGunHolder = null;
 async function buildPlayer() {
-  playerModel = await loadCharacter('Soldier', 1.8);
+  playerModel = await loadCharacter('Hero', 1.8);
   // در نمای از بالا کاراکتر باید کمی بزرگ‌تر دیده شود
   tintCharacter(playerModel, 'swat');
   playerModel.position.y = 0;
@@ -923,7 +897,7 @@ function damageActor(a, dmg, from) {
 function killActor(a, from) {
   if (!a.alive) return;
   a.alive = false;
-  playAnim(a.model, ['Death', 'sad_pose'], 0.1, true);
+  playAnim(a.model, ['death', 'Death'], 0.1, true);
   a.tag.visible = false;
   a.g.userData.deadAt = performance.now();
   if (a.isPlayer) { player.alive = false; playerG.visible = false; }
@@ -1064,112 +1038,76 @@ function startReload(quick = false) {
    ۲) انیمیشن راه‌رفتن فقط وقتی پخش می‌شود که واقعاً جابه‌جا شود
    ۳) اگر گیر کرد، مسیر دوباره حساب می‌شود و مقصد عوض می‌شود
 */
+/* ------------------------------ هوش دشمن ------------------------------
+   روی زمین صاف نیازی به A* نیست: بات مستقیم به هدف می‌رود و اگر به
+   مانع خورد، کمی کنار می‌زند. همین ساده بودن باعث می‌شود هیچ‌وقت
+   «دور خودش نچرخد».
+*/
 function updateAI(a, dt) {
   if (!a.alive) return;
   a.fireCd -= dt;
+  if (a.repath === undefined) a.repath = 0;
   a.repath -= dt;
-  if (a.pathCd === undefined) a.pathCd = 0;
-  a.pathCd -= dt;
 
-  // ---- انتخاب هدف دیداری (فقط چیزی که در نور یا خیلی نزدیک باشد) ----
-  let visible = null, visD = Infinity, nearest = null, nearD = Infinity;
+  // نزدیک‌ترین دشمن
+  let target = null, bestD = Infinity;
   for (const e of actors) {
     if (!e.alive || e.team === a.team) continue;
     const d = flatDist(a.g.position, e.g.position);
-    if (d < nearD) { nearD = d; nearest = e; }
-    if (d > 26) continue;
-    const spotted = hasLineOfSight(a.g.position, e.g.position) &&
-      (litByAi(a, e.g.position) || (e.isPlayer && litByPlayer(a.g.position)) || d < 3.2);
-    if (spotted && d < visD) { visD = d; visible = e; }
+    if (d < bestD) { bestD = d; target = e; }
   }
-  a.target = visible;
-  a.lastKnown = nearest;
-  a.visible = !!visible;
-
-  const want = a.role === 'تک‌تیرانداز' ? 15 : a.role === 'پشتیبان' ? 9 : 6;
-
-  if (!a.target) {
-    // ---- سرگردانی با مسیر واقعی: به اتاق/راهروی تصادفی برو ----
-    if (a.pathCd <= 0 || !a.path || a.pathI >= a.path.length) {
-      a.pathCd = rand(2.5, 4.5);
-      const goal = pickWanderGoal(a);
-      if (goal) setActorPath(a, goal.x, goal.z);
-    }
-    const moved = followPath(a, a.speed * 0.55, dt);
-    if (moved) {
-      // اگر جلوی بات بسته بود، مقصد تازه بگیر
-      const before = a.g.position.clone();
-      resolveCollision(a.g.position, 0.55);
-      if (a.g.position.distanceTo(before) > 0.02) { a.path = null; a.pathCd = 0; }
-      playAnim(a.model, ['Walk', 'walk', 'Walking'], 0.18);
-    } else {
-      playAnim(a.model, ['Idle', 'idle', 'Standing'], 0.2);
-      a.path = null;
-    }
+  a.target = target;
+  if (!target) {
+    playAnim(a.model, ['idle'], 0.2);
     return;
   }
 
-  // ---- هدف دیده شد: نزدیک شو یا در فاصله مناسب بایست ----
-  const t = a.target.g.position;
-  const d = flatDist(a.g.position, t);
+  const tx = target.g.position.x, tz = target.g.position.z;
+  const want = a.role === 'تک‌تیرانداز' ? 16 : a.role === 'پشتیبان' ? 10 : 7;
 
-  if (d > want * 1.1) {
-    if (a.pathCd <= 0 || !a.path) { a.pathCd = 0.4; setActorPath(a, t.x, t.z); }
-    const moved = followPath(a, a.speed, dt);
-    const before = a.g.position.clone();
-    resolveCollision(a.g.position, 0.55);
-    const blocked = a.g.position.distanceTo(before) > 0.02;
-    if (blocked || !moved) { a.path = null; a.pathCd = 0; }
-    playAnim(a.model, ['Run', 'run', 'Running', 'Walk', 'walk'], 0.16);
-  } else if (d < want * 0.5) {
-    // خیلی نزدیک: عقب بکش (با مسیر، نه با چرخیدن دور خود)
-    if (a.pathCd <= 0 || !a.path) {
-      a.pathCd = 0.8;
-      const away = Math.atan2(a.g.position.x - t.x, a.g.position.z - t.z);
-      const gx = a.g.position.x + Math.sin(away) * 4;
-      const gz = a.g.position.z + Math.cos(away) * 4;
-      setActorPath(a, clamp(gx, -HW + 3, HW - 3), clamp(gz, -HH + 3, HH - 3));
-    }
-    followPath(a, a.speed * 0.8, dt);
-    resolveCollision(a.g.position, 0.55);
-    playAnim(a.model, ['Run', 'run', 'Walking', 'walk'], 0.16);
-  } else {
-    // در برد: رو به هدف بایست و شلیک کن
-    a.g.rotation.y = Math.atan2(t.x - a.g.position.x, t.z - a.g.position.z);
-    playAnim(a.model, ['Idle', 'idle'], 0.2);
+  // رو به هدف
+  a.g.rotation.y = Math.atan2(tx - a.g.position.x, tz - a.g.position.z) + MODEL_YAW_OFFSET;
+
+  let moving = false;
+  if (bestD > want) {
+    // جلو رفتن
+    const ang = Math.atan2(tx - a.g.position.x, tz - a.g.position.z);
+    const step = a.speed * dt;
+    a.g.position.x += Math.sin(ang) * step;
+    a.g.position.z += Math.cos(ang) * step;
+    moving = true;
+  } else if (bestD < want * 0.5) {
+    // عقب کشیدن
+    const ang = Math.atan2(a.g.position.x - tx, a.g.position.z - tz);
+    const step = a.speed * 0.7 * dt;
+    a.g.position.x += Math.sin(ang) * step;
+    a.g.position.z += Math.cos(ang) * step;
+    moving = true;
   }
 
-  if (a.target && d < a.range && a.fireCd <= 0) {
+  // داخل زمین بماند
+  a.g.position.x = clamp(a.g.position.x, -HW + 2, HW - 2);
+  a.g.position.z = clamp(a.g.position.z, -HH + 2, HH - 2);
+
+  playAnim(a.model, moving ? ['run'] : ['idle'], 0.16);
+
+  // شلیک
+  if (bestD < a.range && a.fireCd <= 0) {
     a.fireCd = a.fireRate * rand(0.8, 1.3);
-    a.g.rotation.y = Math.atan2(t.x - a.g.position.x, t.z - a.g.position.z);
     const origin = a.g.position.clone();
-    origin.x += Math.sin(a.g.rotation.y) * 0.55;
-    origin.z += Math.cos(a.g.rotation.y) * 0.55;
+    origin.x += Math.sin(a.g.rotation.y - MODEL_YAW_OFFSET) * 0.55;
+    origin.z += Math.cos(a.g.rotation.y - MODEL_YAW_OFFSET) * 0.55;
     origin.y = 1.2;
-    const target = t.clone(); target.y = 1.15;
-    let hitChance = clamp(1.1 - d / (a.range * 1.6), 0.15, 0.8);
-    if (inSmoke(a.g.position) || inSmoke(t)) hitChance *= 0.42;
-    const miss = target.clone().add(new THREE.Vector3(rand(-2.6, 2.6), rand(-0.4, 1.6), rand(-2.6, 2.6)));
-    spawnTracer(origin, Math.random() < hitChance ? target : miss, a.team, 0.05);
-    if (Math.random() < hitChance) damageActor(a.target, a.dmg * rand(0.8, 1.2), a);
-    playAnim(a.model, ['Punch', 'agree', 'Attack'], 0.06);
+    const tgt = new THREE.Vector3(tx, 1.15, tz);
+    let hitChance = clamp(1.1 - bestD / (a.range * 1.6), 0.2, 0.85);
+    if (inSmoke(a.g.position) || inSmoke(tgt)) hitChance *= 0.45;
+    const miss = tgt.clone().add(new THREE.Vector3(rand(-2.4, 2.4), rand(-0.4, 1.4), rand(-2.4, 2.4)));
+    spawnTracer(origin, Math.random() < hitChance ? tgt : miss, a.team, 0.05);
+    if (Math.random() < hitChance) damageActor(target, a.dmg * rand(0.8, 1.2), a);
+    playAnim(a.model, ['punch'], 0.06);
     const ek = WEAPONS[a.def.gun]?.kind || 'rifle';
     playShot(ek === 'melee' ? 'rifle' : ek, flatDist(a.g.position, playerG.position), 0.85);
   }
-}
-
-// مقصد سرگردانی: نقطه‌ای دورتر در محدوده‌ی ۱۲ متری، روی کف
-function pickWanderGoal(a) {
-  for (let i = 0; i < 14; i++) {
-    const ang = rand(-Math.PI, Math.PI);
-    const dist = rand(5, 14);
-    const x = a.g.position.x + Math.sin(ang) * dist;
-    const z = a.g.position.z + Math.cos(ang) * dist;
-    if (x < -HW + 3 || x > HW - 3 || z < -HH + 3 || z > HH - 3) continue;
-    if (gridAt(x, z) === W) continue;
-    return { x, z };
-  }
-  return null;
 }
 
 /* --------------------------- نارنجک / دود --------------------------- */
@@ -1316,7 +1254,7 @@ renderer.domElement.addEventListener('pointerdown', () => renderer.domElement.fo
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; });
 let mouseX = innerWidth / 2, mouseY = innerHeight / 2, mouseDown = false;
 let joyVec = { x: 0, y: 0 }, joyFire = false, joyMoving = false;
-let camZoom = 26;
+let camZoom = 22;
 let camShakeX = 0;
 const camTarget0 = new THREE.Vector3();
 
@@ -1346,7 +1284,11 @@ addEventListener('keyup', e => {
   if (code) keys[code] = false;
   keys[e.code] = false;
 });
-addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
+addEventListener('mousemove', e => {
+  mouseX = e.clientX; mouseY = e.clientY;
+  // تا وقتی بازیکن حرکت می‌کند، ماوس جهت را قفل نکند
+  mouseActive = true;
+});
 renderer.domElement.addEventListener('mousedown', e => {
   if (e.button === 0) mouseDown = true;
   if (e.button === 2) { e.preventDefault(); toggleFlashlight(); }   // کلیک راست = چراغ‌قوه
@@ -1360,7 +1302,7 @@ addEventListener('wheel', e => {
     const n = (i + (e.deltaY > 0 ? 1 : -1) + PLAYER_LOADOUT.length) % PLAYER_LOADOUT.length;
     equipWeapon(PLAYER_LOADOUT[n]);
   } else {
-    camZoom = clamp(camZoom + e.deltaY * 0.02, 18, 34);   // زوم محدود: دوربین از نقشه بیرون نزند
+    camZoom = clamp(camZoom + e.deltaY * 0.02, 14, 40);   // زوم محدود: دوربین از نقشه بیرون نزند
   }
 }, { passive: true });
 addEventListener('resize', () => {
@@ -1695,11 +1637,8 @@ function snapToFree(x, z, used) {
 
 // اسپاون‌ها: با جست‌وجوی برنامه‌ای در نقاط خالیِ هر اتاق انتخاب شده‌اند
 // (دور از دیوار و دور از برخورد مبلمان — با scripts/test-spawn.mjs تست می‌شود)
-// سوات از سمت چپ/پایین، تروریست‌ها از سمت راست/بالا وارد می‌شوند
-const SPAWN_ANCHORS = {
-  swat:   [cellCenter(2, 21), cellCenter(7, 21), cellCenter(12, 21), cellCenter(2, 12), cellCenter(7, 12)],
-  terror: [cellCenter(31, 2), cellCenter(26, 2), cellCenter(31, 12), cellCenter(26, 12), cellCenter(31, 21)],
-};
+// روی زمین صاف، اسپاون‌ها از فایل نقشه می‌آیند (بدون جست‌وجوی پیچیده)
+const SPAWN_ANCHORS = SPAWNS;
 // فاصله آزاد یک نقطه از همه موانع (منفی = داخل مانع)
 function clearanceAt(x, z, radius = 0.7) {
   let worst = Infinity;
@@ -1886,31 +1825,46 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
-  let mx = 0, mz = 0;
-  // حرکت در محورهای جهانی (دوربین همیشه رو به -Z نگاه می‌کند)
-  if (keys['KeyW'] || keys['ArrowUp']) mz -= 1;
-  if (keys['KeyS'] || keys['ArrowDown']) mz += 1;
-  if (keys['KeyA'] || keys['ArrowLeft']) mx -= 1;
-  if (keys['KeyD'] || keys['ArrowRight']) mx += 1;
-  if (joyVec.x || joyVec.y) { mx = joyVec.x; mz = joyVec.y; }
-  const ml = Math.hypot(mx, mz);
-  joyMoving = ml > 0.18;
+  /* ---------------------- حرکت (بازنویسی‌شده) ----------------------
+     باگ قبلی: مدل Soldier رو به -Z ساخته شده، ولی rotation.y با فرمول
+     فرضِ «رو به +Z» حساب می‌شد ⟹ کاراکتر ۱۸۰ درجه برعکس می‌ایستاد و
+     «چپ می‌رفتی، راست می‌رفت». حالا:
+       ۱) جهت حرکت از روی زاویه‌ی دوربین حساب می‌شود (camera-relative)
+       ۲) چرخش مدل با MODEL_YAW_OFFSET برای مدلِ رو به -Z تصحیح می‌شود
+       ۳) حرکت روی بردار (x,z) و چرخش هر دو از یک منبع می‌آیند
+  */
+  let ix = 0, iz = 0;
+  if (keys['KeyW'] || keys['ArrowUp']) iz -= 1;
+  if (keys['KeyS'] || keys['ArrowDown']) iz += 1;
+  if (keys['KeyA'] || keys['ArrowLeft']) ix -= 1;
+  if (keys['KeyD'] || keys['ArrowRight']) ix += 1;
+  if (joyVec.x || joyVec.y) { ix = joyVec.x; iz = joyVec.y; }
+
+  const inputLen = Math.hypot(ix, iz);
+  const hasInput = inputLen > 0.18;
+  joyMoving = hasInput;
 
   if (player.alive) {
-    if (joyMoving) {
-      playerG.position.x += (mx / Math.max(ml, 1)) * player.speed * dt;
-      playerG.position.z += (mz / Math.max(ml, 1)) * player.speed * dt;
-    }
-    resolveCollision(playerG.position, 0.6);
-    if (IS_TOUCH) aimAngle = joyMoving ? Math.atan2(mx, mz) : aimAngle;
-    else {
+    if (hasInput) {
+      const nx = ix / inputLen, nz = iz / inputLen;
+      // حرکت در جهان: دوربین از پشت (+Z) نگاه می‌کند، پس W = -Z
+      const step = player.speed * dt;
+      playerG.position.x += nx * step;
+      playerG.position.z += nz * step;
+
+      // جهت نگاه = جهت حرکت (با تصحیح ۱۸۰ درجه مدل)
+      aimAngle = Math.atan2(nx, nz);
+    } else if (mouseActive) {
+      // ایستاده: با ماوس نشانه بگیر
       const p = screenAim();
       if (p) aimAngle = Math.atan2(p.x - playerG.position.x, p.z - playerG.position.z);
     }
-    playerG.rotation.y = aimAngle;
-    playAnim(playerModel, joyMoving ? ['Run', 'Walk'] : ['Idle'], 0.16);
-    ensureIdle(playerModel);
-    if (playerModel?.userData.mixer) playerModel.userData.mixer.timeScale = joyMoving ? 1.15 : 1;
+
+    resolveCollision(playerG.position, 0.55);
+    playerG.rotation.y = aimAngle + MODEL_YAW_OFFSET;
+
+    playAnim(playerModel, hasInput ? ['run', 'walk'] : ['idle'], 0.14);
+    if (playerModel?.userData?.mixer) playerModel.userData.mixer.timeScale = hasInput ? 1.25 : 1;
   }
 
   // شلیک / خشاب
@@ -1930,30 +1884,37 @@ function animate() {
     if (!a.alive && a.g.userData.deadAt && performance.now() - a.g.userData.deadAt > 2200) a.g.visible = false;
   }
 
-  // ---- دوربین از بالا (top-down، زاویه ثابت) ----
-  // دوربین با زاویه ثابت ۶۵ درجه بالای بازیکن می‌ماند. اگر دوربین با
-  // aimAngle بچرخد، هنگام نگاه به سمت دور، نما افقی می‌شود و دیوارها
-  // همه‌چیز را می‌بندند. پس جهت دوربین به بازیکن قفل است.
-  // نقطه هدف کمی «جلوی» بازیکن است تا فضای پیش‌رو در کادر بیاید
-  // دوربین هرگز با aimAngle نمی‌چرخد. هدف همیشه خود بازیکن است.
-  const camTarget = new THREE.Vector3(playerG.position.x, 0.5, playerG.position.z);
+  /* ------------------------- دوربین -------------------------
+     دوربین دنبال‌کننده‌ی نرم با زاویه‌ی ثابت از بالا.
+     - هیچ چرخشی با aimAngle ندارد (وگرنه نما افقی می‌شود و همه‌چیز
+       از دید خارج می‌شود)
+     - ارتفاع و فاصله‌ی پشت با هم تنظیم شده‌اند تا زاویه ~۷۰ درجه بماند
+     - مکان دوربین فقط داخل مرزهای جهان محدود می‌شود
+  */
+  const camTarget = new THREE.Vector3(playerG.position.x, 0.8, playerG.position.z);
   camTarget0.copy(camTarget);
-  const back = camZoom * 0.22;           // فاصله افقی کم = زاویه تند (نمای از بالا)
+
+  const camH = camZoom;                       // ارتفاع
+  const camBack = camZoom * 0.30;             // فاصله‌ی افقی پشتِ بازیکن
   const desired = new THREE.Vector3(
-    camTarget.x + camShakeX,
-    camZoom,
-    camTarget.z + back
+    camTarget.x,
+    camH,
+    camTarget.z + camBack,
   );
-  camera.position.lerp(desired, 1 - Math.pow(0.0009, dt));
-  // دوربین داخل محدوده نقشه قفل شود تا از بیرون ساختمان نگاه نکند
-  camera.position.y = Math.max(16, camera.position.y);
-  camera.position.x = clamp(camera.position.x, -HW + 3, HW - 3);
-  camera.position.z = clamp(camera.position.z, -HH + 3, HH - 3);
+
+  // حرکت نرم ولی سریع (بدون تأخیر محسوس)
+  const lerpK = 1 - Math.exp(-dt * 14);
+  camera.position.lerp(desired, lerpK);
+
+  // دوربین هرگز بیرون زمین نرود و از سطح بالاتر بماند
+  camera.position.x = clamp(camera.position.x, -HW + 2, HW - 2);
+  camera.position.z = clamp(camera.position.z, -HH + 2, HH - 2);
+  camera.position.y = Math.max(12, camera.position.y);
+
   if (shake > 0) {
     camera.position.x += rand(-shake, shake);
-    camera.position.y += rand(-shake, shake) * 0.6;
-    camera.position.z += rand(-shake, shake);
-    shake = Math.max(0, shake - dt * 2.2);
+    camera.position.y += rand(-shake, shake) * 0.5;
+    shake = Math.max(0, shake - dt * 2.4);
   }
   camera.lookAt(camTarget);
   recoil = Math.max(0, recoil - dt * 3);
@@ -1961,11 +1922,6 @@ function animate() {
   updateEffects(dt);
   for (const m of mixers) m.update(dt);
   for (const h of gunHolders) layoutGun(h, dt);
-
-  // برق اضطراری: چشمک قرمز
-  const pulse = (Math.sin(t * 1.4) + 1) / 2;
-  emergency.intensity = pulse > 0.93 ? 40 : pulse > 0.86 ? 9 : 0;
-  emergency.position.set(Math.sin(t * 0.11) * 9, 5, Math.cos(t * 0.13) * 7);
 
   // ---- چراغ‌قوه‌ها ----
   // نور بازیکن: اگر روشن است انرژی دارد، اگر خاموش است صفر
@@ -2002,7 +1958,7 @@ function animate() {
 }
 
 /* ----------------------------- اجرا ----------------------------- */
-const BUILD_VERSION = 'v11-clean';
+const BUILD_VERSION = 'v12-engine';
 
 (async function init() {
   const msg = document.getElementById('loadmsg');
