@@ -17,7 +17,7 @@ const IS_TOUCH = 'ontouchstart' in window;
 // ⚠️ مدل‌های Soldier و Xbot رو به -Z ساخته شده‌اند (پنجه‌پا z منفی).
 // فرمول چرخش سه‌جی‌اس فرض می‌کند مدل رو به +Z است، پس ۱۸۰ درجه
 // تصحیح لازم است؛ وگرنه کاراکتر برعکس حرکت می‌کند («چپ میرم راست میره»).
-const MODEL_YAW_OFFSET = 0;  // مدل‌های blocky رو به +Z هستند
+const MODEL_YAW_OFFSET = 0;  // برای کاراکترهایی که رو به -Z هستند، yaw خود مدل در CHAR_FILES است
 const FLOOR_Y = 0.09;   // ارتفاع سطح کاشی کف
 
 const clamp = THREE.MathUtils.clamp;
@@ -90,7 +90,7 @@ scene.background = new THREE.Color(0x010204);
 // همه‌چیز حتی کف زیر پای بازیکن با رنگ مه (تقریباً سیاه) جایگزین می‌شد.
 scene.fog = new THREE.FogExp2(0x04070e, 0.0045);
 
-const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 260);
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 260);
 camera.position.set(0, 26, 16);
 
 // برق قطع است: نور محیط بسیار کم
@@ -157,11 +157,15 @@ function loadProp(cat, name, target, mode = 'height') {
 // مدل کاراکتر: انیمیشن از شوالیه (ریگ یکسان) روی مدل تیم ریتارگت می‌شود
 
 // ---------- کاراکترها: مدل و انیمیشن از خود فایل GLB ----------
+/* کاراکترها: مدل Quaternius با ریگ واقعی و ۲۴ کلیپ (Idle_Gun، Run_Shoot،
+   Death، …). مدل قبلی (blocky) مثل آدم‌های مکعبی ماینکرفت بود و برای
+   شوتر تاکتیکی مناسب نبود. این مدل تکسچر ندارد و رنگش از متریال می‌آید،
+   پس تینت تیمی هم هیچ جزئیاتی را از بین نمی‌برد.
+   yaw = مدل رو به کدام محور است (۰ یعنی +Z). */
 const CHAR_FILES = {
-  Hero:  { path: '/models/chars/blocky_01_hero.glb',  height: 1.8 },  // تیم سوات
-  Robot: { path: '/models/chars/blocky_08_robot.glb', height: 1.9 },  // تیم تروریست
+  Hero:  { path: '/models/chars/swat.glb',      height: 1.82, yaw: 0 },  // سوات — مدل رو به +Z
+  Robot: { path: '/models/chars/swat_urban.glb', height: 1.82, yaw: 0 }, // تروریست — مدل رو به +Z
 };
-// هر دو مدل ۱۰ انیمیشن واقعی دارند: idle/walk/run/punch/death/wave/jump/fall/cheer/dance
 
 /* کاراکترها: هر فایل GLB فقط یک‌بار بارگذاری می‌شود و با SkeletonUtils کلون می‌شود.
    Soldier.glb → سرباز (Idle/Run/Walk/TPose)
@@ -203,6 +207,7 @@ async function loadCharacter(key, target = 1.8) {
   root.userData.baseY = -bboxOf(root).min.y;
   root.userData.charKey = key;
   root.userData.height = target;
+  root.userData.yaw = info.yaw ?? 0;   // جهت مدل: ۰ = رو به +Z
 
   const mixer = new THREE.AnimationMixer(root);
   const actions = {};
@@ -216,7 +221,7 @@ async function loadCharacter(key, target = 1.8) {
   root.userData.current = null;
   mixers.push(mixer);
 
-  const idle = findClip(src.clips, ['Idle', 'Standing']);
+  const idle = findClip(src.clips, ['Idle_Gun_Pointing', 'Idle_Gun_Shoot', 'Idle_Gun', 'Idle']);
   if (idle) { actions[idle.name].play(); root.userData.current = idle.name; }
   return root;
 }
@@ -255,9 +260,18 @@ function ensureIdle(obj) {
 function playAnim(obj, keys, fade = 0.18, once = false) {
   const acts = obj?.userData?.actions;
   if (!acts) return;
-  const names = Object.keys(acts);
   const clips = Object.values(acts).map(a => a.getClip());
-  const clip = findClip(clips, keys);
+  // نام کلیپ‌ها پیشوند ریگ دارند: «CharacterArmature|Idle_Gun»
+  const norm = clips.map(c => ({ c, n: c.name.split('|').pop() }));
+  let clip = null;
+  for (const k of keys) {
+    const hit = norm.find(x => x.n.toLowerCase() === k.toLowerCase());
+    if (hit) { clip = hit.c; break; }
+  }
+  if (!clip) for (const k of keys) {
+    const hit = norm.find(x => x.n.toLowerCase().includes(k.toLowerCase()));
+    if (hit) { clip = hit.c; break; }
+  }
   if (!clip || obj.userData.current === clip.name) return;
   const prev = acts[obj.userData.current], next = acts[clip.name];
   if (!next) return;
@@ -499,51 +513,86 @@ function instancedFrom(gltf, placements, target, mode = 'footprint', opts = {}) 
   return im;
 }
 
-/* ------------------------- ساخت زمین ------------------------- */
-// زمین صاف و یکدست. هیچ دیواری نیست تا اول انجین (حرکت/دوربین/شلیک) درست شود.
+/* ------------------------- ساخت زمین -------------------------
+   زمین صاف و یکدست، بدون شبکه‌ی آبی که صحنه را شبیه نرم‌افزار CAD
+   می‌کرد. یک بافت بتنِ ساده و چند لکه‌ی تیره/روشن برای حس فضا.
+*/
 function buildShell() {
   const W = WORLD_W, D = WORLD_D;
 
-  // کف: یک صفحه‌ی بزرگ با بافت کاشی
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x2a3440, roughness: 0.92, metalness: 0.02,
-  });
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorMat);
+  // بافت زمین: نویز ملایم خاکستری، تولیدشده روی canvas
+  const S = 512;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#3a3d42';
+  ctx.fillRect(0, 0, S, S);
+  // لکه‌های نرم
+  for (let i = 0; i < 900; i++) {
+    const x = Math.random() * S, y = Math.random() * S;
+    const r = 6 + Math.random() * 46;
+    const shade = 40 + Math.random() * 34;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(${shade},${shade + 2},${shade + 5},0.16)`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  }
+  // دانه‌های ریز
+  const img = ctx.getImageData(0, 0, S, S);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const n = (Math.random() - 0.5) * 16;
+    img.data[i] += n; img.data[i+1] += n; img.data[i+2] += n;
+  }
+  ctx.putImageData(img, 0, 0);
+
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(W / 8, D / 8);
+  tex.anisotropy = 4;
+
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(W, D),
+    new THREE.MeshStandardMaterial({ map: tex, color: 0x9aa0a8, roughness: 0.95, metalness: 0.0 })
+  );
   floor.rotation.x = -Math.PI / 2;
-  floor.position.y = 0;
   floor.receiveShadow = true;
   scene.add(floor);
 
-  // خطوط شبکه‌ی ملایم تا حرکت و مقیاس دیده شود
-  const gridHelper = new THREE.GridHelper(Math.max(W, D), Math.max(W, D) / TILE, 0x3d4d61, 0x333f4f);
-  gridHelper.position.y = 0.012;
-  gridHelper.material.transparent = true;
-  gridHelper.material.opacity = 0.55;
-  scene.add(gridHelper);
+  // حاشیه‌ی روشن دور زمین تا مرزها معلوم باشند (به‌جای شبکه‌ی سراسری)
+  const edgeMat = new THREE.MeshBasicMaterial({ color: 0x5b6b7e, transparent: true, opacity: 0.55 });
+  const mkEdge = (w, d, x, z) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), edgeMat);
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(x, 0.02, z);
+    scene.add(m);
+  };
+  mkEdge(W, 0.35, 0, -D/2 + 0.2);
+  mkEdge(W, 0.35, 0,  D/2 - 0.2);
+  mkEdge(0.35, D, -W/2 + 0.2, 0);
+  mkEdge(0.35, D,  W/2 - 0.2, 0);
 
   // نشانه‌ی مرکز زمین
   const ring = new THREE.Mesh(
-    new THREE.RingGeometry(7.4, 7.6, 64),
-    new THREE.MeshBasicMaterial({ color: 0x4a86c8, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false })
+    new THREE.RingGeometry(5.9, 6.1, 64),
+    new THREE.MeshBasicMaterial({ color: 0x6b7f96, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false })
   );
   ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.02;
+  ring.position.y = 0.025;
   scene.add(ring);
 
-  // چهار ستون راهنما در گوشه‌ها (فقط برای درک جهت و مقیاس)
-  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x39485a, roughness: 0.8 });
-  for (const [x, z] of [[-W/2 + 2, -D/2 + 2], [W/2 - 2, -D/2 + 2], [-W/2 + 2, D/2 - 2], [W/2 - 2, D/2 - 2]]) {
-    const p = new THREE.Mesh(new THREE.BoxGeometry(1.2, 3.2, 1.2), pillarMat);
-    p.position.set(x, 1.6, z);
+  // پایه‌های نوری در گوشه‌ها (فقط برای حس مقیاس و جهت)
+  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x4a5563, roughness: 0.85 });
+  const capMat = new THREE.MeshBasicMaterial({ color: 0x9fb6d4 });
+  for (const [x, z] of [[-W/2 + 3, -D/2 + 3], [W/2 - 3, -D/2 + 3], [-W/2 + 3, D/2 - 3], [W/2 - 3, D/2 - 3]]) {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(1.0, 3.4, 1.0), pillarMat);
+    p.position.set(x, 1.7, z);
     scene.add(p);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.12, 1.1), capMat);
+    cap.position.set(x, 3.45, z);
+    scene.add(cap);
   }
 }
-
-/* -------------------------- مبلمان شرکت -------------------------- */
-// flat = روی زمین (فرش/کابل)، ceiling = آویزان از سقف
-// مبلمان: هر اتاق چند قطعه، همه رو به مرکز اتاق، روی کف و دور از درها.
-// مختصات بر اساس ROOMS (ردیف/ستون) محاسبه شده تا با نقشه هم‌تراز باشد.
-// مبلمان از src/map.js می‌آید (هم‌تراز با اتاق‌ها)
 
 // زمین خالی است: هیچ مبلمانی ساخته نمی‌شود.
 async function buildFurniture() { }
@@ -640,16 +689,51 @@ function litByAi(a, p) {
   return a.alive && inCone(a, p, 0.30, 16);
 }
 
+/* رنگ‌آمیزی تیم:
+   قبلاً کل مدل با emissive یکدست آبی/قرمز می‌شد و کاراکتر به یک لکه‌ی
+   تخت تبدیل می‌شد («الکی و زشت»). حالا:
+     - رنگ و بافت اصلی مدل حفظ می‌شود
+     - فقط یک هاله‌ی ملایم رنگی برای تشخیص تیم اضافه می‌شود
+     - یک حلقه‌ی رنگی زیر پای کاراکتر می‌آید تا موقعیتش واضح باشد
+*/
 function tintCharacter(model, team) {
-  const base = team === 'swat' ? new THREE.Color(0x1b4c8f) : new THREE.Color(0x8c2418);
+  const base = team === 'swat' ? new THREE.Color(0x3d7fd0) : new THREE.Color(0xd04a35);
+  const accent = team === 'swat' ? new THREE.Color(0x4a5f78) : new THREE.Color(0x6b6252);
   model.traverse(o => {
-    if (o.isMesh && o.material) {
-      // مواد در loadCharacter از قبل کلون شده‌اند، پس اینجا دست نمی‌زنیم
-      o.material.emissive = base.clone().multiplyScalar(0.5);
-      o.material.emissiveIntensity = team === 'swat' ? 0.5 : 0.65;
-      o.material.needsUpdate = true;
+    if (!o.isMesh || !o.material) return;
+    const m = o.material;
+    /* مدل تکسچر ندارد و رنگش از baseColorFactor است. پس رنگ لباس را
+       عوض می‌کنیم (سوات آبی-خاکستری، تروریست خاکی) و رنگ پوست را
+       دست نمی‌زنیم — این‌طور هم تیم از دور معلوم است، هم کاراکتر
+       «لکه‌ی رنگی» نمی‌شود. */
+    const n = (m.name || '').toLowerCase();
+    if (n === 'skin') {
+      m.color.setHex(0xc98d63);
+    } else if (n === 'visor') {
+      m.color.setHex(team === 'swat' ? 0x1b2733 : 0x241a14);
+      m.emissive = base.clone().multiplyScalar(0.35);
+      m.emissiveIntensity = 1.0;   // شیشه‌ی ماسک کمی می‌درخشد
+    } else {
+      m.color.copy(accent);
+      m.emissive = base.clone().multiplyScalar(0.05);
+      m.emissiveIntensity = 1.0;
     }
+    m.roughness = 0.68;
+    m.metalness = 0.12;
+    m.needsUpdate = true;
   });
+  // حلقه‌ی تیمی زیر پا
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.52, 0.68, 32),
+    new THREE.MeshBasicMaterial({
+      color: base, transparent: true, opacity: 0.85,
+      side: THREE.DoubleSide, depthWrite: false,
+    })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.03;
+  ring.name = 'teamRing';
+  model.add(ring);
 }
 
 function findBone(root, names) {
@@ -674,7 +758,7 @@ const GUN_WORLD_LEN = { melee: 0.62, pistol: 0.44, rifle: 0.95, shotgun: 0.95, s
 
 async function attachGun(charRoot, gunName, offset) {
   const d = weaponDef(gunName);
-  const hand = findBone(charRoot, ['mixamorigRightHand', 'mixamorig:RightHand', 'RightHand']);
+  const hand = findBone(charRoot, ['WristR', 'HandR', 'mixamorigRightHand', 'mixamorig:RightHand', 'RightHand']);
   try {
     // اسلحه با واحد «طول» ساخته می‌شود؛ مقیاس نهایی را layoutGun می‌دهد
     const gun = await loadProp(d.cat, d.model, 1.0, 'length');
@@ -690,14 +774,16 @@ async function attachGun(charRoot, gunName, offset) {
     holder.userData.charRoot = charRoot;
     holder.userData.def = d;
     holder.userData.offset = offset || new THREE.Vector3(
-      d.kind === 'pistol' || d.kind === 'melee' ? 0.02 : 0.05,
+      d.kind === 'pistol' || d.kind === 'melee' ? 0.02 : 0.16,
       d.kind === 'melee' ? -0.02 : -0.08,
       0.05,
     );
 
-    // جهت‌دهی: لوله رو به جلوی کاراکتر (+Z)
-    gun.rotation.set(-0.12, Math.PI / 2, 0);
-    if (d.kind === 'melee') gun.rotation.set(Math.PI / 2, 0, Math.PI);
+    /* جهت‌دهی: محور بلند اسلحه در فایل‌ها X است. با چرخش −۹۰° حول Y،
+       X به +Z می‌رود یعنی لوله رو به جلوی کاراکتر. (قبلاً +۹۰° بود و
+       اسلحه رو به عقب/عرض بدن می‌ایستاد.) */
+    gun.rotation.set(-0.10, -Math.PI / 2, 0);
+    if (d.kind === 'melee') gun.rotation.set(Math.PI / 2, 0, 0);
 
     charRoot.add(holder);   // دنبال‌کردن دست در layoutGun انجام می‌شود
 
@@ -713,6 +799,8 @@ async function attachGun(charRoot, gunName, offset) {
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3();
 const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
 const _sc = new THREE.Vector3();
+const _e1 = new THREE.Euler();
+let PITCH_TILT = 0;   // زاویه‌ی بالا/پایین اسلحه هنگام نشانه‌گیری
 
 function layoutGun(h, dt = 0.016) {
   const gun = h.userData.gun, hand = h.userData.hand, root = h.userData.charRoot;
@@ -736,10 +824,13 @@ function layoutGun(h, dt = 0.016) {
     _q1.premultiply(_q2);
 
     const o = h.userData.offset;
-    // جابه‌جایی کوچک به سمت کف دست (در فضای کاراکتر)
-    _v2.copy(o).applyQuaternion(_q1);
-    h.position.copy(_v1).add(_v2);
-    h.quaternion.copy(_q1);
+    /* موقعیت از کف دست گرفته می‌شود، ولی جهتِ اسلحه از چرخش دست
+       گرفته نمی‌شود: استخوان مچ در هر انیمیشن می‌چرخد و اسلحه کج/عقب
+       می‌افتاد. اسلحه در فضای کاراکتر رو به جلو می‌ماند و فقط با
+       زاویه‌ی نشانه‌گیری بازیکن بالا/پایین می‌رود. */
+    h.position.copy(_v1).add(o);
+    _e1.set(-PITCH_TILT, 0, 0);
+    h.quaternion.setFromEuler(_e1);
   } else {
     const hh = root.userData.height || 1.8;
     h.position.set(0.34, hh * 0.62, 0.42);
@@ -757,6 +848,7 @@ async function buildPlayer() {
   // در نمای از بالا کاراکتر باید کمی بزرگ‌تر دیده شود
   tintCharacter(playerModel, 'swat');
   playerModel.position.y = 0;
+  playerModel.rotation.y = playerModel.userData.yaw || 0;
   playerG.add(playerModel);
   await equipWeapon(PLAYER_LOADOUT[0]);
   return playerModel;
@@ -847,6 +939,7 @@ async function spawnActor(def, team, pos) {
   const model = await loadCharacter(def.model, 1.8);
   tintCharacter(model, team);
   model.position.y = 0;
+  model.rotation.y = model.userData.yaw || 0;  // مدل رو به -Z است، گروه رو به +Z
   g.add(model);
   await attachGun(model, def.gun);
 
@@ -897,7 +990,7 @@ function damageActor(a, dmg, from) {
 function killActor(a, from) {
   if (!a.alive) return;
   a.alive = false;
-  playAnim(a.model, ['death', 'Death'], 0.1, true);
+  playAnim(a.model, ['Death'], 0.1, true);
   a.tag.visible = false;
   a.g.userData.deadAt = performance.now();
   if (a.isPlayer) { player.alive = false; playerG.visible = false; }
@@ -1089,7 +1182,7 @@ function updateAI(a, dt) {
   a.g.position.x = clamp(a.g.position.x, -HW + 2, HW - 2);
   a.g.position.z = clamp(a.g.position.z, -HH + 2, HH - 2);
 
-  playAnim(a.model, moving ? ['run'] : ['idle'], 0.16);
+  playAnim(a.model, moving ? ['Run_Shoot', 'Run'] : ['Idle_Gun_Pointing', 'Idle_Gun'], 0.16);
 
   // شلیک
   if (bestD < a.range && a.fireCd <= 0) {
@@ -1104,7 +1197,7 @@ function updateAI(a, dt) {
     const miss = tgt.clone().add(new THREE.Vector3(rand(-2.4, 2.4), rand(-0.4, 1.4), rand(-2.4, 2.4)));
     spawnTracer(origin, Math.random() < hitChance ? tgt : miss, a.team, 0.05);
     if (Math.random() < hitChance) damageActor(target, a.dmg * rand(0.8, 1.2), a);
-    playAnim(a.model, ['punch'], 0.06);
+    playAnim(a.model, ['Gun_Shoot', 'Idle_Gun_Shoot'], 0.06);
     const ek = WEAPONS[a.def.gun]?.kind || 'rifle';
     playShot(ek === 'melee' ? 'rifle' : ek, flatDist(a.g.position, playerG.position), 0.85);
   }
@@ -1254,7 +1347,7 @@ renderer.domElement.addEventListener('pointerdown', () => renderer.domElement.fo
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; });
 let mouseX = innerWidth / 2, mouseY = innerHeight / 2, mouseDown = false;
 let joyVec = { x: 0, y: 0 }, joyFire = false, joyMoving = false;
-let camZoom = 22;
+let camZoom = 7.9;  // ارتفاع دوربین — با فاصله‌ی پشت، زاویه ~۵۲° می‌دهد
 let camShakeX = 0;
 const camTarget0 = new THREE.Vector3();
 
@@ -1302,7 +1395,7 @@ addEventListener('wheel', e => {
     const n = (i + (e.deltaY > 0 ? 1 : -1) + PLAYER_LOADOUT.length) % PLAYER_LOADOUT.length;
     equipWeapon(PLAYER_LOADOUT[n]);
   } else {
-    camZoom = clamp(camZoom + e.deltaY * 0.02, 14, 40);   // زوم محدود: دوربین از نقشه بیرون نزند
+    camZoom = clamp(camZoom + e.deltaY * 0.011, 5.5, 15);   // زوم محدود: دوربین از نقشه بیرون نزند
   }
 }, { passive: true });
 addEventListener('resize', () => {
@@ -1863,7 +1956,7 @@ function animate() {
     resolveCollision(playerG.position, 0.55);
     playerG.rotation.y = aimAngle + MODEL_YAW_OFFSET;
 
-    playAnim(playerModel, hasInput ? ['run', 'walk'] : ['idle'], 0.14);
+    playAnim(playerModel, hasInput ? ['Run_Shoot', 'Run', 'Walk'] : ['Idle_Gun_Pointing', 'Idle_Gun'], 0.14);
     if (playerModel?.userData?.mixer) playerModel.userData.mixer.timeScale = hasInput ? 1.25 : 1;
   }
 
@@ -1891,15 +1984,20 @@ function animate() {
      - ارتفاع و فاصله‌ی پشت با هم تنظیم شده‌اند تا زاویه ~۷۰ درجه بماند
      - مکان دوربین فقط داخل مرزهای جهان محدود می‌شود
   */
-  const camTarget = new THREE.Vector3(playerG.position.x, 0.8, playerG.position.z);
+  /* ⚠️ باگ «نامرئی بودن»: دوربین دقیقاً روی بازیکن نگاه می‌کرد، پس کاراکتر
+     همیشه زیر نشانه‌گر وسط صفحه می‌افتاد و با آن قاطی می‌شد.
+     حالا هدف دوربین کمی «جلوتر» (سمت -Z) است تا بازیکن در یک‌سوم
+     پایین کادر بایستد و فضای پیش‌رو دیده شود. */
+  const LOOK_AHEAD = 4.2;
+  const camTarget = new THREE.Vector3(playerG.position.x, 1.05, playerG.position.z - LOOK_AHEAD);
   camTarget0.copy(camTarget);
 
   const camH = camZoom;                       // ارتفاع
-  const camBack = camZoom * 0.30;             // فاصله‌ی افقی پشتِ بازیکن
+  const camBack = camZoom * 0.78;             // فاصله‌ی افقی پشتِ بازیکن (زاویه ~۵۲°)
   const desired = new THREE.Vector3(
-    camTarget.x,
+    playerG.position.x,
     camH,
-    camTarget.z + camBack,
+    playerG.position.z + camBack,
   );
 
   // حرکت نرم ولی سریع (بدون تأخیر محسوس)
@@ -1909,7 +2007,7 @@ function animate() {
   // دوربین هرگز بیرون زمین نرود و از سطح بالاتر بماند
   camera.position.x = clamp(camera.position.x, -HW + 2, HW - 2);
   camera.position.z = clamp(camera.position.z, -HH + 2, HH - 2);
-  camera.position.y = Math.max(12, camera.position.y);
+  camera.position.y = Math.max(5, camera.position.y);
 
   if (shake > 0) {
     camera.position.x += rand(-shake, shake);

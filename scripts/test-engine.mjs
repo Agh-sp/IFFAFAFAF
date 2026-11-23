@@ -30,18 +30,23 @@ const dist = Math.hypot(SPAWNS.swat[0].x - SPAWNS.terror[0].x, SPAWNS.swat[0].z 
 check(dist > 30, `تیم‌ها از هم دور شروع می‌کنند (${dist.toFixed(0)} متر)`);
 
 console.log('\n=== ۲) حرکت و چرخش ===');
-const camZoom = 22;
-const camera = new THREE.PerspectiveCamera(62, 1.6, 0.1, 400);
-camera.position.set(0, camZoom, camZoom * 0.30);
-camera.lookAt(0, 0.8, 0);
+const MAIN = fs.readFileSync('src/main.js', 'utf8');
+const num = (re, name) => { const m = MAIN.match(re); if (!m) { check(false, `در main.js پیدا نشد: ${name}`); return 0; } return parseFloat(m[1]); };
+const camZoom  = num(/let camZoom = ([\d.]+)/, 'camZoom');
+const camBackK = num(/const camBack = camZoom \* ([\d.]+)/, 'camBack ratio');
+const camFov   = num(/PerspectiveCamera\(([\d.]+),/, 'FOV');
+const lookAhead = num(/const LOOK_AHEAD = ([\d.]+)/, 'LOOK_AHEAD');
+const camera = new THREE.PerspectiveCamera(camFov, 1.6, 0.1, 400);
+camera.position.set(0, camZoom, camZoom * camBackK);
+camera.lookAt(0, 1.05, -lookAhead);
 camera.updateMatrixWorld(true);
 const sx = (x, z) => new THREE.Vector3(x, 0.8, z).project(camera).x;
 check(sx(2, 0) > 0.02, 'کلید D (x+) → راست صفحه');
 check(sx(-2, 0) < -0.02, 'کلید A (x−) → چپ صفحه');
 
 // مدل blocky رو به +Z است، پس بدون تصحیح باید هم‌جهت باشد
-const MODEL_YAW_OFFSET = 0;
-const fwd = th => ({ x: Math.sin(th), z: Math.cos(th) });   // مدل رو به +Z
+const MODEL_YAW_OFFSET = 0;   // مدل swat رو به +Z است (اثبات: ویزور از سمت +Z دیده می‌شود)
+const fwd = th => ({ x: Math.sin(th), z: Math.cos(th) });
 let badDir = 0;
 for (let i = 0; i < 16; i++) {
   const a = (i / 16) * Math.PI * 2, nx = Math.sin(a), nz = Math.cos(a);
@@ -59,10 +64,22 @@ for (const [px, pz] of [[0,0],[HW,0],[-HW,0],[0,HH],[0,-HH],[HW,HH],[-HW,-HH]])
     if (Math.abs(cx) > HW || Math.abs(cz) > HH) camBad++;
   }
 check(camBad === 0, 'دوربین در همه حالت‌ها داخل زمین می‌ماند');
-check(camZoom >= 12, `ارتفاع دوربین ${camZoom} متر (از سطح بالاتر)`);
+
+/* ⚠️ باگ «کاراکتر نامرئی است»: دوربین ۲۲ متر بالا بود و کاراکتر ۱۹ پیکسل
+   از ۴۶۰ می‌شد. این تست همان چیزی را می‌سنجد که بازیکن می‌بیند. */
+const W = 1280, H = 720;
+const cam2 = camera.clone(); cam2.aspect = W / H; cam2.updateProjectionMatrix(); cam2.updateMatrixWorld(true);
+const top = new THREE.Vector3(0, 1.82, 0).project(cam2);
+const bot = new THREE.Vector3(0, 0, 0).project(cam2);
+const px = Math.abs((top.y - bot.y) / 2) * H;
+check(px > H * 0.15, `کاراکتر روی صفحه ${px.toFixed(0)}px از ${H}px (${(px / H * 100).toFixed(0)}٪ کادر) — دیده می‌شود`);
+check(camZoom < 12, `دوربین به اندازه‌ی کافی نزدیک است (${camZoom} متر)`);
+// بازیکن نباید زیر نشانه‌گر وسط صفحه باشد
+const midGap = Math.abs((top.y + bot.y) / 2) * H / 2;
+check(midGap > 40, `کاراکتر ${midGap.toFixed(0)}px پایین‌تر از نشانه‌گر است (قاطی نمی‌شود)`);
 
 console.log('\n=== ۴) کاراکترها و انیمیشن ===');
-const CHAR_FILES = { Hero: 'public/models/chars/blocky_01_hero.glb', Robot: 'public/models/chars/blocky_08_robot.glb' };
+const CHAR_FILES = { Hero: 'public/models/chars/swat.glb', Robot: 'public/models/chars/swat_urban.glb' };
 for (const [name, path] of Object.entries(CHAR_FILES)) {
   const exists = fs.existsSync(path);
   check(exists, `${name}: فایل موجود (${path})`);
@@ -72,9 +89,14 @@ for (const [name, path] of Object.entries(CHAR_FILES)) {
   const jsonLen = buf.readUInt32LE(12);
   const json = JSON.parse(buf.subarray(20, 20 + jsonLen).toString('utf8'));
   const anims = (json.animations || []).map(a => a.name);
-  const need = ['idle', 'walk', 'run'];
-  const have = need.filter(n => anims.some(a => a.toLowerCase() === n));
-  check(have.length === need.length, `${name}: انیمیشن‌های اصلی موجود (${anims.length} انیمیشن: ${anims.slice(0,5).join(', ')}…)`);
+  const need = ['Idle_Gun_Pointing', 'Run', 'Death', 'Gun_Shoot'];
+  const short = anims.map(a => a.split('|').pop());
+  const have = need.filter(n => short.includes(n));
+  check(have.length === need.length,
+    `${name}: انیمیشن‌های لازم موجود (${anims.length} کلیپ؛ کم: ${need.filter(n => !have.includes(n)).join(',') || '—'})`);
+  // ریگ واقعی و جهت مدل
+  check((json.skins || []).length > 0 && json.skins[0].joints.length > 20,
+    `${name}: ریگ واقعی (${json.skins?.[0]?.joints?.length || 0} استخوان)`);
 }
 
 console.log('\n=== ۵) صداهای واقعی ===');
