@@ -114,6 +114,21 @@
   }
   #prompt { position:absolute; bottom:170px; left:50%; transform:translateX(-50%); display:none; font-size:13px; background:rgba(6,14,24,.85); padding:7px 16px; border-radius:10px; border:1px solid rgba(140,190,255,.25); }
 
+  /* کارت راهنما */
+  #helpcard {
+    position:fixed; left:50%; bottom:120px; transform:translate(-50%, 20px);
+    width:min(420px, 92vw); padding:16px 18px; border-radius:16px; z-index:45;
+    background:rgba(6,12,20,.94); border:1px solid rgba(140,190,255,.25);
+    backdrop-filter:blur(10px); box-shadow:0 18px 50px rgba(0,0,0,.65);
+    opacity:0; pointer-events:none; transition:.35s;
+  }
+  #helpcard.show { opacity:1; transform:translate(-50%, 0); }
+  #helpcard h4 { font-size:13px; margin-bottom:10px; color:#ffe08a; }
+  #helpcard .k { display:flex; justify-content:space-between; font-size:11.5px; padding:3px 0; opacity:.9; }
+  #helpcard .k b { color:#8fc9ff; }
+  #helpcard .note { margin-top:10px; font-size:10.5px; line-height:1.7; opacity:.55; }
+  @media (max-width:720px) { #helpcard { bottom:auto; top:60px; } }
+
   /* بنر پایان دور */
   #banner { position:fixed; inset:0; display:grid; place-items:center; z-index:40; pointer-events:none; opacity:0; transition:opacity .4s; background:rgba(2,6,12,.55); }
   #banner.show { opacity:1; }
@@ -283,6 +298,18 @@
     </div>
     <button class="close" id="boardClose">بستن</button>
   </div>
+</div>
+
+<div id="helpcard">
+  <h4>🔦 راهنمای سریع</h4>
+  <div class="k"><b>کلیک راست</b><span>چراغ‌قوه روشن/خاموش</span></div>
+  <div class="k"><b>۱ / ۲ / ۳</b><span>شاتگان سنگین / کلت / چاقو</span></div>
+  <div class="k"><b>W A S D</b><span>حرکت — ماوس نشانه‌گیری</span></div>
+  <div class="k"><b>کلیک چپ</b><span>شلیک / ضربه</span></div>
+  <div class="k"><b>R</b><span>پر کردن خشاب</span></div>
+  <div class="k"><b>Q / F</b><span>نارنجک / دودزا</span></div>
+  <div class="k"><b>Tab</b><span>تخته امتیاز</span></div>
+  <p class="note">در تاریکی هیچ‌کس کسی را نمی‌بیند — فقط چیزی که در مخروط چراغ‌قوه‌ات باشد.</p>
 </div>
 
 <div id="banner"><div class="box"><h2></h2><p></p></div></div>

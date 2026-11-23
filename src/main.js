@@ -577,7 +577,9 @@ async function attachGun(charRoot, gunName, offset) {
   try {
     const gun = await loadProp(d.cat, d.model, d.kind === 'melee' ? 0.62 : d.kind === 'pistol' ? 0.55 : 1.05,
       d.kind === 'melee' ? 'length' : 'length');
+    // جهت‌دهی لوله به سمت جلو (محور +Z کاراکتر) و کمی مایل به پایین
     gun.rotation.set(0, Math.PI / 2, 0);
+    if (d.kind === 'melee') gun.rotation.set(Math.PI / 2, 0, Math.PI);
     gun.position.copy(off);
     const holder = new THREE.Group();
     holder.name = 'gunHolder';
@@ -609,19 +611,20 @@ async function equipWeapon(name) {
   // اسلحه قبلی را از دست بردار
   if (playerGunHolder) {
     playerGunHolder.parent?.remove(playerGunHolder);
-    if (weaponLightGroup.parent) weaponLightGroup.parent.remove(weaponLightGroup);
     playerGunHolder = null;
   }
   playerGunHolder = await attachGun(playerModel, name);
-  // چراغ‌قوه را سرِ اسلحه سوار کن
-  const anchor = playerGunHolder || playerModel;
-  anchor.add(weaponLightGroup);
-  // مخروط نور از نوک لوله به جلو
-  weaponLightGroup.position.set(0, 0.05, 0);
+
+  // مهم: چراغ‌قوه به «بدنه بازیکن» بسته می‌شود، نه به استخوان دست.
+  // دست در انیمیشن می‌چرخد؛ اگر نور به آن بسته شود، پرتو به هر طرف می‌رود.
+  // بدنه بازیکن همیشه با aimAngle می‌چرخد، پس نور دقیقاً جلوی اسلحه می‌ماند.
+  if (weaponLightGroup.parent !== playerG) playerG.add(weaponLightGroup);
+  const isPistol = d.kind === 'pistol' || d.kind === 'melee';
+  weaponLightGroup.position.set(isPistol ? 0.16 : 0.3, 1.12, 0.42);
   weaponLightGroup.rotation.set(0, 0, 0);
-  wLight.spot.position.set(0, 0, 0.55);
-  wLight.spot.target.position.set(0, -0.12, 15);
-  wLight.halo.position.set(0, 0, 0.7);
+  wLight.spot.position.set(0, 0, 0);
+  wLight.spot.target.position.set(0, -0.72, 18);
+  wLight.halo.position.set(0, 0, 0.55);
   toast(`🔫 ${d.fa} برداشته شد`);
   updateHUD();
   return d;
@@ -1469,7 +1472,12 @@ async function startRound() {
   refreshStatics();
   document.getElementById('roundtext').textContent = `دور ${faNum(roundNum)}`;
   document.getElementById('banner').classList.remove('show');
-  toast('⚡ برق شرکت قطع شده — تروریست‌ها را پیدا کن');
+  toast('⚡ برق قطع است | کلیک راست = چراغ‌قوه | ۱ ۲ ۳ = شاتگان/کلت/چاقو');
+  const help = document.getElementById('helpcard');
+  if (help && roundNum === 1) {
+    help.classList.add('show');
+    setTimeout(() => help.classList.remove('show'), 9000);
+  }
   roundLock = false;
 }
 
@@ -1596,8 +1604,9 @@ function animate() {
   const targetI = lightState.on ? 26 : 0;
   wLight.spot.intensity += (targetI - wLight.spot.intensity) * Math.min(1, dt * 14);
   // لرزش خیلی کم نور همراه با حرکت (دست لرزان)
-  wLight.spot.position.x = Math.sin(t * 6) * (joyMoving ? 0.035 : 0.012);
-  wLight.spot.position.y = 0.55 + Math.sin(t * 4.3) * 0.012;
+  weaponLightGroup.position.x = (WEAPONS[player.weapon].kind === 'pistol' || WEAPONS[player.weapon].kind === 'melee' ? 0.16 : 0.3)
+    + Math.sin(t * 6) * (joyMoving ? 0.035 : 0.014);
+  weaponLightGroup.position.y = 1.12 + Math.sin(t * 4.3) * 0.012;
   wLight.halo.intensity += ((lightState.on ? 1.4 : 0) - wLight.halo.intensity) * Math.min(1, dt * 12);
   selfGlow.visible = lightState.on;
 
