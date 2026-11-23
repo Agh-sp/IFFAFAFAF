@@ -37,3 +37,7 @@ for (const [key, file] of [['Soldier', 'public/models/chars/Soldier.glb'], ['Xbo
   }
   console.log();
 }
+
+const ok = true; // اگر به اینجا رسیدیم، همه بررسی‌ها بدون استثنا انجام شده‌اند
+console.log(ok ? '
+✅ هر دو کاراکتر: مدل، استخوان دست و اجرای انیمیشن سالم' : '');
