@@ -1,0 +1,30 @@
+{
+  "name": "iffafafaf",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Agh-sp/IFFAFAFAF.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Agh-sp/IFFAFAFAF/issues"
+  },
+  "homepage": "https://github.com/Agh-sp/IFFAFAFAF#readme",
+  "dependencies": {
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.65.1",
+    "vite": "^8.3.8"
+  },
+  "type": "module"
+}

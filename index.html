@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>روستای سه‌بعدی — بازی از نمای بالا</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&display=swap" rel="stylesheet" />
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html,body { width:100%; height:100%; overflow:hidden; background:#0b1a12; font-family:'Vazirmatn',Tahoma,sans-serif; }
+    #game { position:fixed; inset:0; }
+    canvas { display:block; }
+
+    /* ---------- HUD ---------- */
+    #hud { position:fixed; inset:0; pointer-events:none; z-index:10; color:#fff; }
+    .panel { background:rgba(8,20,14,.72); border:1px solid rgba(255,255,255,.14); border-radius:14px; backdrop-filter:blur(6px); }
+    #topbar { position:absolute; top:12px; right:12px; left:12px; display:flex; gap:10px; align-items:center; justify-content:space-between; }
+    #stats { display:flex; gap:10px; align-items:center; padding:8px 14px; }
+    .stat { display:flex; align-items:center; gap:6px; font-weight:700; font-size:15px; }
+    .stat small { opacity:.65; font-weight:400; font-size:12px; }
+    #hpwrap { width:170px; height:14px; background:rgba(255,255,255,.15); border-radius:8px; overflow:hidden; border:1px solid rgba(255,255,255,.25); }
+    #hpfill { height:100%; width:100%; background:linear-gradient(90deg,#ff5a4e,#ffb03a); transition:width .2s; }
+    #weaponbox { padding:8px 14px; text-align:center; min-width:150px; }
+    #weaponname { font-weight:900; font-size:16px; color:#ffd76a; }
+    #weaponhint { font-size:11px; opacity:.7; }
+    #minimap { width:150px; height:150px; border-radius:12px; border:1px solid rgba(255,255,255,.25); background:#1d3a24; }
+    .btn { pointer-events:auto; cursor:pointer; border:none; border-radius:12px; padding:10px 16px; font-family:inherit; font-weight:900; font-size:14px; color:#0b1a12; background:linear-gradient(180deg,#ffe27a,#ffb03a); box-shadow:0 4px 14px rgba(0,0,0,.4); }
+    .btn:hover { filter:brightness(1.08); }
+    .btn.ghost { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.3); }
+
+    #prompt { position:absolute; bottom:110px; left:50%; transform:translateX(-50%); padding:10px 20px; font-weight:900; font-size:16px; display:none; }
+    #prompt b { color:#ffd76a; }
+    #toast { position:absolute; top:84px; left:50%; transform:translateX(-50%); padding:8px 18px; font-weight:700; display:none; }
+    #help { position:absolute; bottom:12px; right:12px; padding:10px 14px; font-size:12.5px; line-height:1.9; opacity:.95; }
+    #help kbd { background:rgba(255,255,255,.18); border-radius:5px; padding:1px 7px; font-family:inherit; font-weight:700; }
+    #loading { position:fixed; inset:0; z-index:50; background:#0b1a12; color:#fff; display:flex; flex-direction:column; gap:14px; align-items:center; justify-content:center; }
+    .spin { width:52px; height:52px; border:5px solid rgba(255,255,255,.15); border-top-color:#ffd76a; border-radius:50%; animation:sp 1s linear infinite; }
+    @keyframes sp { to { transform:rotate(360deg); } }
+
+    /* ---------- Gallery ---------- */
+    #gallery { position:fixed; inset:0; z-index:20; display:none; background:rgba(5,12,8,.55); }
+    #gallery.open { display:block; }
+    #gpanel { position:absolute; top:12px; bottom:12px; right:12px; width:300px; padding:14px; overflow-y:auto; }
+    #gpanel h2 { font-size:17px; margin-bottom:4px; color:#ffd76a; }
+    #gpanel p { font-size:12px; opacity:.75; margin-bottom:12px; line-height:1.8; }
+    .ggroup { font-weight:900; font-size:13px; color:#9fe8b0; margin:12px 0 6px; }
+    .gitem { display:block; width:100%; text-align:right; background:rgba(255,255,255,.07); color:#fff; border:1px solid rgba(255,255,255,.1); border-radius:9px; padding:7px 10px; margin-bottom:5px; cursor:pointer; font-family:inherit; font-size:13px; }
+    .gitem:hover, .gitem.sel { background:rgba(255,215,106,.22); border-color:#ffd76a; }
+    #ginfo { position:absolute; bottom:14px; left:50%; transform:translateX(-50%); padding:10px 18px; text-align:center; }
+    #gname { font-weight:900; font-size:17px; color:#ffd76a; }
+    #ghint { font-size:12px; opacity:.75; }
+    #gclose { position:absolute; top:12px; left:12px; }
+
+    /* ---------- Mobile controls ---------- */
+    #joy { position:fixed; bottom:26px; right:26px; width:120px; height:120px; border-radius:50%; background:rgba(255,255,255,.08); border:2px solid rgba(255,255,255,.25); z-index:15; display:none; touch-action:none; }
+    #joyknob { position:absolute; width:52px; height:52px; border-radius:50%; background:rgba(255,255,255,.35); top:34px; right:34px; }
+    #atkbtn { position:fixed; bottom:40px; left:26px; width:86px; height:86px; border-radius:50%; z-index:15; display:none; font-size:15px; }
+    @media (pointer:coarse) { #joy, #atkbtn { display:block; } #help { display:none; } }
+  </style>
+</head>
+<body>
+  <div id="game"></div>
+
+  <div id="loading"><div class="spin"></div><div>در حال بارگذاری مدل‌های سه‌بعدی…</div><div id="loadmsg" style="font-size:13px;opacity:.7"></div></div>
+
+  <div id="hud">
+    <div id="topbar">
+      <div id="stats" class="panel">
+        <div class="stat"><span>❤️</span><div id="hpwrap"><div id="hpfill"></div></div></div>
+        <div class="stat"><span>🏆</span><span id="score">۰</span><small>امتیاز</small></div>
+        <div class="stat"><span>🌊</span><span id="wave">۱</span><small>موج</small></div>
+        <div class="stat"><span>👾</span><span id="kills">۰</span><small>دشمن</small></div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <div id="weaponbox" class="panel"><div id="weaponname">شمشیر</div><div id="weaponhint">کلیک = حمله</div></div>
+        <canvas id="minimap" width="150" height="150"></canvas>
+        <button class="btn" id="galleryBtn">🎨 گالری مدل‌ها</button>
+      </div>
+    </div>
+    <div id="prompt" class="panel"></div>
+    <div id="toast" class="panel"></div>
+    <div id="help" class="panel">
+      <kbd>W A S D</kbd> حرکت &nbsp;•&nbsp; <kbd>ماوس</kbd> نشانه‌گیری &nbsp;•&nbsp; <kbd>کلیک</kbd> حمله<br/>
+      <kbd>E</kbd> برداشتن اسلحه &nbsp;•&nbsp; <kbd>غلتک ماوس</kbd> زوم &nbsp;•&nbsp; <kbd>Esc</kbd> بستن گالری
+    </div>
+  </div>
+
+  <div id="gallery">
+    <div id="gpanel" class="panel">
+      <h2>🎨 گالری مدل‌های سه‌بعدی</h2>
+      <p>۵۶ مدل رایگان (CC0) از پک‌های <b>Quaternius</b> — دانلودشده از گیت‌هاب (منبع: github.com/trebeljahr/quaternius-showcase). روی هر مدل کلیک کن تا در صحنه بچرخد.</p>
+      <div id="glist"></div>
+    </div>
+    <button class="btn ghost" id="gclose">✕ بستن (Esc)</button>
+    <div id="ginfo" class="panel"><div id="gname">—</div><div id="ghint">بکشید تا بچرخد • غلتک = زوم</div></div>
+  </div>
+
+  <div id="joy"><div id="joyknob"></div></div>
+  <button class="btn" id="atkbtn">⚔️ حمله</button>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
