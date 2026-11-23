@@ -57,11 +57,11 @@ const SWAT_TEAM = [
 ];
 // تیم تروریست: ربات با ۱۴ انیمیشن (شامل Death و Punch)
 const TERROR_TEAM = [
-  { id: 'ter1', name: 'تروریست ۱', model: 'Robot', gun: 'AR_3',     role: 'مهاجم',      hp: 105 },
-  { id: 'ter2', name: 'تروریست ۲', model: 'Robot', gun: 'SMG_2',    role: 'خرابکار',    hp: 95 },
-  { id: 'ter3', name: 'تروریست ۳', model: 'Robot', gun: 'Sniper_1', role: 'تک‌تیرانداز', hp: 100 },
-  { id: 'ter4', name: 'تروریست ۴', model: 'Robot', gun: 'Pistol_2', role: 'نفربر',      hp: 100 },
-  { id: 'ter5', name: 'تروریست ۵', model: 'Robot', gun: 'AR_5',     role: 'مهاجم',      hp: 95 },
+  { id: 'ter1', name: 'تروریست ۱', model: 'Xbot', gun: 'AR_3',     role: 'مهاجم',      hp: 105 },
+  { id: 'ter2', name: 'تروریست ۲', model: 'Xbot', gun: 'SMG_2',    role: 'خرابکار',    hp: 95 },
+  { id: 'ter3', name: 'تروریست ۳', model: 'Xbot', gun: 'Sniper_1', role: 'تک‌تیرانداز', hp: 100 },
+  { id: 'ter4', name: 'تروریست ۴', model: 'Xbot', gun: 'Pistol_2', role: 'نفربر',      hp: 100 },
+  { id: 'ter5', name: 'تروریست ۵', model: 'Xbot', gun: 'AR_5',     role: 'مهاجم',      hp: 95 },
 ];
 
 const ABILITY_CD = { grenade: 6, smoke: 12 };
@@ -105,6 +105,14 @@ const cache = new Map();
 const pathOf = (cat, name) => `/models/${cat}/${name}.glb`;
 
 function bboxOf(o) { o.updateMatrixWorld(true); return new THREE.Box3().setFromObject(o); }
+// جعبه بدنه بر اساس استخوان‌ها: مستقل از T-pose و از مقیاس عجیب گره‌های میانی
+function boneBox(o) {
+  o.updateMatrixWorld(true);
+  const b = new THREE.Box3(), v = new THREE.Vector3();
+  let any = false;
+  o.traverse(n => { if (n.isBone) { b.expandByPoint(n.getWorldPosition(v)); any = true; } });
+  return any ? b : bboxOf(o);
+}
 
 // هیچ مدلی نباید غول‌آسا شود. مدل‌هایی مثل کابل در محور Y کشیده‌اند و
 // اگر فقط ابعاد افقی نرمال شود، ارتفاعشان چند ده متر می‌شود.
@@ -143,43 +151,68 @@ function loadProp(cat, name, target, mode = 'height') {
 // مدل کاراکتر: انیمیشن از شوالیه (ریگ یکسان) روی مدل تیم ریتارگت می‌شود
 
 // ---------- کاراکترها: مدل و انیمیشن از خود فایل GLB ----------
-// Soldier.glb: Idle / Run / Walk  |  RobotExpressive.glb: ۱۴ انیمیشن
 const CHAR_FILES = {
-  Soldier: { path: '/models/chars/Soldier.glb', height: 1.8 },
-  Robot:   { path: '/models/chars/RobotExpressive.glb', height: 1.9 },
+  Soldier: { path: '/models/chars/Soldier.glb', height: 1.8 },  // سرباز سوات
+  Xbot:    { path: '/models/chars/Xbot.glb',    height: 1.8 },  // تروریست (ریگ Mixamo)
 };
 
-function loadCharacter(key, target = 1.8) {
-  const info = CHAR_FILES[key];
-  return loader.loadAsync(info.path).then(gltf => {
-    const root = gltf.scene;
-    root.traverse(o => {
-      if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; o.frustumCulled = false; }
-    });
-    const b = bboxOf(root), s = b.getSize(new THREE.Vector3());
-    root.scale.multiplyScalar(target / (s.y || 1));
-    bboxOf(root);
-    const hNow = bboxOf(root).getSize(new THREE.Vector3()).y;
-    if (Math.abs(hNow - target) > 0.4) root.scale.multiplyScalar(target / (hNow || 1));
-    bboxOf(root);
-    root.userData.baseY = -bboxOf(root).min.y;
-    root.userData.charKey = key;
+/* کاراکترها: هر فایل GLB فقط یک‌بار بارگذاری می‌شود و با SkeletonUtils کلون می‌شود.
+   Soldier.glb → سرباز (Idle/Run/Walk/TPose)
+   Xbot.glb    → تروریست (idle/run/walk/agree/headShake/sneak_pose)
+   هر دو ریگ Mixamo هستند، پس ارتفاع و مقیاسشان یکسان است. */
+const CHAR_CACHE = new Map();   // key → { scene, clips }
 
-    const mixer = new THREE.AnimationMixer(root);
-    const actions = {};
-    for (const clip of gltf.animations) actions[clip.name] = mixer.clipAction(clip);
-    root.userData.mixer = mixer;
-    root.userData.actions = actions;
-    root.userData.current = null;
-    mixers.push(mixer);
-    // اولین انیمیشن ایستاده را پخش کن
-    const idle = findClip(gltf.animations, ['Idle', 'Standing']);
-    if (idle) { actions[idle.name].play(); root.userData.current = idle.name; }
-    return root;
+function rawCharacter(key) {
+  if (!CHAR_CACHE.has(key)) {
+    const info = CHAR_FILES[key];
+    CHAR_CACHE.set(key, loader.loadAsync(info.path).then(gltf => ({
+      scene: gltf.scene,
+      clips: gltf.animations || [],
+    })));
+  }
+  return CHAR_CACHE.get(key);
+}
+
+async function loadCharacter(key, target = 1.8) {
+  const info = CHAR_FILES[key];
+  const src = await rawCharacter(key);
+  // کلون اسکلتی واقعی: مش‌ها و استخوان‌ها کپی می‌شوند تا هر کاراکتر انیمیشن مستقل داشته باشد
+  const root = SkeletonUtils.clone(src.scene);
+  root.traverse(o => {
+    if (o.isMesh) {
+      o.castShadow = false;
+      o.receiveShadow = true;
+      o.frustumCulled = false;
+      // مواد را کلون کن تا نور/رنگ هر کاراکتر مستقل باشد
+      if (o.material) o.material = Array.isArray(o.material)
+        ? o.material.map(m => m.clone()) : o.material.clone();
+    }
   });
+
+  // نرمال‌سازی قد از جعبه مش‌ها (هر دو مدل Mixamo در حالت دست-پایین حدود
+  // ۱.۸ متر هستند، پس این اندازه‌گیری معتبر است).
+  const rawH = bboxOf(root).getSize(new THREE.Vector3()).y || 1;
+  root.scale.multiplyScalar(target / rawH);
+  root.userData.baseY = -bboxOf(root).min.y;
+  root.userData.charKey = key;
+  root.userData.height = target;
+
+  const mixer = new THREE.AnimationMixer(root);
+  const actions = {};
+  for (const clip of src.clips) actions[clip.name] = mixer.clipAction(clip);
+  root.userData.mixer = mixer;
+  root.userData.actions = actions;
+  root.userData.current = null;
+  mixers.push(mixer);
+
+  const idle = findClip(src.clips, ['Idle', 'Standing']);
+  if (idle) { actions[idle.name].play(); root.userData.current = idle.name; }
+  return root;
 }
 
 const mixers = [];
+const gunHolders = [];
+
 const findClip = (clips, keys) => {
   for (const k of keys) {
     const ex = clips.find(c => c.name.split('|').pop().toLowerCase() === k.toLowerCase());
@@ -597,9 +630,10 @@ function tintCharacter(model, team) {
   const base = team === 'swat' ? new THREE.Color(0x1b4c8f) : new THREE.Color(0x8c2418);
   model.traverse(o => {
     if (o.isMesh && o.material) {
-      o.material = o.material.clone();
+      // مواد در loadCharacter از قبل کلون شده‌اند، پس اینجا دست نمی‌زنیم
       o.material.emissive = base.clone().multiplyScalar(0.5);
       o.material.emissiveIntensity = team === 'swat' ? 0.5 : 0.65;
+      o.material.needsUpdate = true;
     }
   });
 }
@@ -616,37 +650,91 @@ const gunPath = name => {
   return `/models/${d.cat}/${d.model}.glb`;
 };
 
+/* ---------------- نصب سلاح در دست ----------------
+   مشکل ریگ‌ها: استخوان دست در این ریگ‌ها مقیاس حدود ۰.۰۱ دارد و با انیمیشن
+   هم تغییر می‌کند. اگر اسلحه مستقیم به استخوان بسته شود، یا میکروسکوپی
+   می‌شود یا کل صفحه را می‌پوشاند.
+   راه‌حل: هر فریم مقیاس گروهِ اسلحه طوری تنظیم می‌شود که طولش در جهان
+   ثابت بماند و موقعیتش هم نسبت به کف دست در متر محاسبه می‌شود. */
+const GUN_WORLD_LEN = { melee: 0.62, pistol: 0.44, rifle: 0.95, shotgun: 0.95, sniper: 1.05 };
+
 async function attachGun(charRoot, gunName, offset) {
   const d = weaponDef(gunName);
-  // Soldier = ریگ Mixamo (mixamorig:RightHand) | Robot = Hand.R
-  // اسمها بعد از بارگذاری GLTFLoader پاک‌سازی می‌شوند: mixamorig:RightHand → mixamorigRightHand
-  const hand = findBone(charRoot, [
-    'mixamorigRightHand', 'mixamorig:RightHand', 'RightHand',
-    'Palm1R', 'Palm2R', 'HandR', 'Hand.R', 'Hand_R', 'PalmR', 'Palm.R',
-  ]);
-  const off = offset || new THREE.Vector3(d.kind === 'pistol' ? 0.02 : 0.05, d.kind === 'melee' ? -0.02 : -0.1, 0.06);
+  const hand = findBone(charRoot, ['mixamorigRightHand', 'mixamorig:RightHand', 'RightHand']);
   try {
-    // اسلحه با بزرگ‌ترین بُعد نرمال می‌شود تا هرگز از دست بزرگ‌تر نشود
-    const gun = await loadProp(d.cat, d.model, d.kind === 'melee' ? 0.55 : d.kind === 'pistol' ? 0.5 : 0.95, 'length');
-    // جهت‌دهی لوله به سمت جلو (محور +Z کاراکتر) و کمی مایل به پایین
-    const isRobot = charRoot.userData?.charKey === 'Robot';
-    if (isRobot) {
-      gun.rotation.set(0, Math.PI / 2, 0);
-      gun.position.set(off.x, off.y + 0.02, off.z + 0.05);
-    } else {
-      gun.rotation.set(-0.15, Math.PI / 2, 0);
-      gun.position.copy(off);
-    }
-    if (d.kind === 'melee') gun.rotation.set(Math.PI / 2, 0, Math.PI);
-    gun.position.copy(off);
+    // اسلحه با واحد «طول» ساخته می‌شود؛ مقیاس نهایی را layoutGun می‌دهد
+    const gun = await loadProp(d.cat, d.model, 1.0, 'length');
+    const rawSize = bboxOf(gun).getSize(new THREE.Vector3());
+    const gunLen = Math.max(rawSize.x, rawSize.y, rawSize.z) || 1;
+
     const holder = new THREE.Group();
     holder.name = 'gunHolder';
     holder.add(gun);
-    if (hand) hand.add(holder);
-    else { holder.position.set(0.45, 1.15, 0.35); charRoot.add(holder); }
     holder.userData.gun = gun;
+    holder.userData.gunLen = gunLen;
+    holder.userData.hand = hand || null;
+    holder.userData.charRoot = charRoot;
+    holder.userData.def = d;
+    holder.userData.offset = offset || new THREE.Vector3(
+      d.kind === 'pistol' || d.kind === 'melee' ? 0.02 : 0.05,
+      d.kind === 'melee' ? -0.02 : -0.08,
+      0.05,
+    );
+
+    // جهت‌دهی: لوله رو به جلوی کاراکتر (+Z)
+    gun.rotation.set(-0.12, Math.PI / 2, 0);
+    if (d.kind === 'melee') gun.rotation.set(Math.PI / 2, 0, Math.PI);
+
+    charRoot.add(holder);   // دنبال‌کردن دست در layoutGun انجام می‌شود
+
+    gunHolders.push(holder);
+    layoutGun(holder, 1);   // اولین چیدمان فوری (بدون انتظار برای فریم بعد)
     return holder;
-  } catch { return null; }
+  } catch (e) { console.warn('سلاح نصب نشد:', gunName, e); return null; }
+}
+
+// هر فریم: اسلحه را «دنبال دست» می‌بریم، اما در فضای خودِ کاراکتر.
+// چرا؟ استخوان دست این ریگ‌ها مقیاس ۰.۰۱ و ماتریس شِییر دارد؛ بستن مستقیم
+// اسلحه به استخوان باعث می‌شود یا نامرئی شود یا کل صفحه را بپوشاند.
+const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3();
+const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
+const _sc = new THREE.Vector3();
+
+function layoutGun(h, dt = 0.016) {
+  const gun = h.userData.gun, hand = h.userData.hand, root = h.userData.charRoot;
+  if (!gun || !h.parent) return;
+  const d = h.userData.def || {};
+  const worldLen = GUN_WORLD_LEN[d.kind] || 0.9;
+  const gunLen = h.userData.gunLen || 1;
+
+  // مقیاس کاراکتر در جهان (برای اینکه طول اسلحه در متر ثابت بماند)
+  root.updateWorldMatrix(true, false);
+  root.getWorldScale(_sc);
+  const rootScale = Math.abs(_sc.x) || 1;
+
+  if (hand) {
+    hand.updateWorldMatrix(true, false);
+    // موقعیت و چرخش دست در فضای کاراکتر
+    hand.getWorldPosition(_v1);
+    root.worldToLocal(_v1);
+    hand.getWorldQuaternion(_q1);
+    root.getWorldQuaternion(_q2).invert();
+    _q1.premultiply(_q2);
+
+    const o = h.userData.offset;
+    // جابه‌جایی کوچک به سمت کف دست (در فضای کاراکتر)
+    _v2.copy(o).applyQuaternion(_q1);
+    h.position.copy(_v1).add(_v2);
+    h.quaternion.copy(_q1);
+  } else {
+    const hh = root.userData.height || 1.8;
+    h.position.set(0.34, hh * 0.62, 0.42);
+    h.quaternion.identity();
+  }
+  // طول اسلحه در جهان ≈ worldLen
+  const want = worldLen / (gunLen * rootScale);
+  const cur = h.scale.x || want;
+  h.scale.setScalar(Math.abs(cur - want) < 1e-4 ? want : cur + (want - cur) * Math.min(1, dt * 14));
 }
 
 let playerGunHolder = null;
@@ -742,7 +830,7 @@ async function spawnActor(def, team, pos) {
   g.position.set(pos.x, FLOOR_Y, pos.z);
   g.rotation.y = team === 'swat' ? 0 : Math.PI;
   scene.add(g);
-  const model = await loadCharacter(def.model, def.model === 'Robot' ? 1.9 : 1.8);
+  const model = await loadCharacter(def.model, 1.8);
   tintCharacter(model, team);
   model.position.y = 0;
   g.add(model);
@@ -795,7 +883,7 @@ function damageActor(a, dmg, from) {
 function killActor(a, from) {
   if (!a.alive) return;
   a.alive = false;
-  playAnim(a.model, ['Death'], 0.1, true);
+  playAnim(a.model, ['Death', 'sad_pose'], 0.1, true);
   a.tag.visible = false;
   a.g.userData.deadAt = performance.now();
   if (a.isPlayer) { player.alive = false; playerG.visible = false; }
@@ -954,7 +1042,7 @@ function updateAI(a, dt) {
   }
   if (!a.target) {
     // در تاریکی سرگردان می‌شود (بدون دید واقعی)
-    playAnim(a.model, ['Idle', 'Standing'], 0.2);
+    playAnim(a.model, ['Idle', 'idle', 'Standing'], 0.2);
     if (a.wanderCd === undefined) a.wanderCd = rand(0.5, 2);
     a.wanderCd -= dt;
     if (a.wanderCd <= 0) {
@@ -969,7 +1057,7 @@ function updateAI(a, dt) {
       const before = a.g.position.clone();
       resolveCollision(a.g.position, 0.55);
       if (a.g.position.distanceTo(before) < step * 0.3) a.wanderDir = rand(-Math.PI, Math.PI);
-      playAnim(a.model, ['Walk', 'Walking'], 0.2);
+      playAnim(a.model, ['Walk', 'walk', 'Walking'], 0.2);
     }
     return;
   }
@@ -1004,7 +1092,7 @@ function updateAI(a, dt) {
     resolveCollision(a.g.position, 0.55);
     moving = true;
   }
-  playAnim(a.model, moving ? ['Run', 'Running', 'Walk', 'Walking'] : ['Idle', 'Standing'], 0.16);
+  playAnim(a.model, moving ? ['Run', 'run', 'Running', 'Walk', 'walk'] : ['Idle', 'idle'], 0.16);
 
   if (seen && d < a.range && a.fireCd <= 0) {
     a.fireCd = a.fireRate * rand(0.8, 1.3);
@@ -1020,7 +1108,7 @@ function updateAI(a, dt) {
     const miss = target.clone().add(new THREE.Vector3(rand(-2.6, 2.6), rand(-0.4, 1.6), rand(-2.6, 2.6)));
     spawnTracer(origin, Math.random() < hitChance ? target : miss, a.team, 0.05);
     if (Math.random() < hitChance) damageActor(a.target, a.dmg * rand(0.8, 1.2), a);
-    playAnim(a.model, ['Punch', 'Attack'], 0.06);
+    playAnim(a.model, ['Punch', 'agree', 'Attack'], 0.06);
     const ek = WEAPONS[a.def.gun]?.kind || 'rifle';
     playShot(ek === 'melee' ? 'rifle' : ek, flatDist(a.g.position, playerG.position), 0.85);
   }
@@ -1372,7 +1460,7 @@ const GALLERY_NAMES = {
   Sniper_1: 'تک‌تیرانداز ۱', Sniper_2: 'تک‌تیرانداز ۲', Grenade_1: 'نارنجک', Grenade_2: 'نارنجک دود',
 };
 const GALLERY = [
-  { cat: 'team', title: '🧍 کاراکترها (مدل + انیمیشن)', list: ['Soldier', 'Robot'] },
+  { cat: 'team', title: '🧍 کاراکترها (مدل + انیمیشن)', list: ['Soldier', 'Xbot'] },
   { cat: 'weapons2', title: '🔫 اسلحه‌های بازیکن (سنگین/کلت/چاقو)', list: ['Shotgun_1', 'Shotgun_2', 'Shotgun_SawedOff', 'Shotgun_ShortStock', 'Revolver_1', 'Revolver_2', 'Revolver_3', 'Pistol_1', 'Pistol_2', 'Knife', 'Torch'] },
   { cat: 'guns', title: '🔫 سلاح‌های تیم‌ها و نارنجک', list: ['AR_1', 'AR_3', 'AR_5', 'SMG_1', 'SMG_2', 'Pistol_1', 'Sniper_1', 'Sniper_2', 'Grenade_1', 'Grenade_2'] },
   { cat: 'office', title: '🏢 ساختمان شرکت', list: ['FloorTile_Basic', 'Wall_1', 'Wall_4', 'DoorSingle_Wall_SideA', 'Door_Double', 'Window_Wall_SideA', 'Column_1', 'Staircase', 'RoofTile_Plate'] },
@@ -1869,6 +1957,7 @@ function animate() {
     camera.lookAt(target);
     if (gModel?.userData?.mixer) gModel.userData.mixer.update(dt);
     for (const m of mixers) m.update(dt);
+    for (const h of gunHolders) layoutGun(h, dt);
     renderer.render(scene, camera);
     return;
   }
@@ -1895,7 +1984,7 @@ function animate() {
       if (p) aimAngle = Math.atan2(p.x - playerG.position.x, p.z - playerG.position.z);
     }
     playerG.rotation.y = aimAngle;
-    playAnim(playerModel, joyMoving ? ['Run', 'Walk'] : ['Idle', 'Standing'], 0.16);
+    playAnim(playerModel, joyMoving ? ['Run', 'Walk'] : ['Idle'], 0.16);
     ensureIdle(playerModel);
     if (playerModel?.userData.mixer) playerModel.userData.mixer.timeScale = joyMoving ? 1.15 : 1;
   }
@@ -1947,6 +2036,7 @@ function animate() {
 
   updateEffects(dt);
   for (const m of mixers) m.update(dt);
+  for (const h of gunHolders) layoutGun(h, dt);
 
   // برق اضطراری: چشمک قرمز
   const pulse = (Math.sin(t * 1.4) + 1) / 2;
@@ -1988,7 +2078,7 @@ function animate() {
 }
 
 /* ----------------------------- اجرا ----------------------------- */
-const BUILD_VERSION = 'v8-real-assets';
+const BUILD_VERSION = 'v9-real-char-guns';
 
 (async function init() {
   const msg = document.getElementById('loadmsg');

@@ -14,13 +14,13 @@ const load = f => new Promise((res, rej) => {
   loader.parse(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), '', res, rej);
 });
 
-for (const [key, file] of [['Soldier', 'public/models/chars/Soldier.glb'], ['Robot', 'public/models/chars/RobotExpressive.glb']]) {
+for (const [key, file] of [['Soldier', 'public/models/chars/Soldier.glb'], ['Xbot', 'public/models/chars/Xbot.glb']]) {
   const g = await load(file);
   g.scene.updateMatrixWorld(true);
   const size = new THREE.Box3().setFromObject(g.scene).getSize(new THREE.Vector3());
   let meshes = 0, bones = 0;
   g.scene.traverse(o => { if (o.isMesh) meshes++; if (o.isBone) bones++; });
-  const hand = g.scene.getObjectByName(key === 'Soldier' ? 'mixamorigRightHand' : 'Palm1R');
+  const hand = g.scene.getObjectByName('mixamorigRightHand');
   console.log(`${key}: ${size.y.toFixed(2)}m قد | ${meshes} mesh | ${bones} استخوان | ${g.animations.length} انیمیشن`);
   console.log(`  انیمیشن‌ها: ${g.animations.map(a => a.name).join(', ')}`);
   console.log(`  استخوان دست راست: ${hand ? '✅ ' + hand.name : '❌ پیدا نشد'}`);

@@ -1,0 +1,27 @@
+// تست کلون اسکلتی: دو نمونه از یک فایل، انیمیشن مستقل
+globalThis.self = globalThis;
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import * as THREE from 'three';
+import fs from 'node:fs';
+const loader = new GLTFLoader();
+const load = f => new Promise((res, rej) => { const b = fs.readFileSync(f); loader.parse(b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength),'',res,rej); });
+const g = await load('public/models/chars/Soldier.glb');
+const a = SkeletonUtils.clone(g.scene), b = SkeletonUtils.clone(g.scene);
+const boneA = a.getObjectByName('mixamorigRightHand');
+const boneB = b.getObjectByName('mixamorigRightHand');
+let sameBone = false; a.traverse(o => { if (o.isBone && o === boneB) sameBone = true; });
+console.log('استخوان‌ها مستقل:', boneA && boneB && boneA !== boneB ? '✅' : '❌');
+const mA = new THREE.AnimationMixer(a), mB = new THREE.AnimationMixer(b);
+const idleClip = g.animations.find(c=>/idle/i.test(c.name));
+const runClip  = g.animations.find(c=>/run/i.test(c.name));
+mA.clipAction(idleClip).play(); mB.clipAction(runClip).play();
+const p0a = boneA.getWorldPosition(new THREE.Vector3());
+const p0b = boneB.getWorldPosition(new THREE.Vector3());
+mA.update(0.5); mB.update(0.5);
+a.updateMatrixWorld(true); b.updateMatrixWorld(true);
+const dA = p0a.distanceTo(boneA.getWorldPosition(new THREE.Vector3()));
+const dB = p0b.distanceTo(boneB.getWorldPosition(new THREE.Vector3()));
+console.log(`انیمیشن Idle روی نمونه A حرکت داد: ${dA.toFixed(3)}m ${dA>0.01?'✅':'❌'}`);
+console.log(`انیمیشن Run روی نمونه B حرکت داد:  ${dB.toFixed(3)}m ${dB>0.01?'✅':'❌'}`);
+console.log('دو نمونه از هم مستقل:', Math.abs(dA-dB) > 0.001 ? '✅' : '⚠️ یکسان');
