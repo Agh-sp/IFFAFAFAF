@@ -20,16 +20,32 @@ const flatDist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
 /* ------------------------- تجهیزات و تیم‌ها ------------------------- */
 const WEAPONS = {
-  AR_1:     { fa: 'تفنگ مهاجم AR-1', dmg: 13, cd: 0.13, mag: 30, range: 26, spread: 0.05 },
-  AR_3:     { fa: 'تفنگ AR-3',       dmg: 14, cd: 0.12, mag: 30, range: 26, spread: 0.05 },
-  AR_5:     { fa: 'تفنگ AR-5',       dmg: 11, cd: 0.10, mag: 30, range: 24, spread: 0.06 },
-  SMG_1:    { fa: 'مسلسل SMG-1',     dmg: 9,  cd: 0.07, mag: 35, range: 18, spread: 0.08 },
-  SMG_2:    { fa: 'مسلسل SMG-2',     dmg: 10, cd: 0.08, mag: 35, range: 18, spread: 0.07 },
-  Pistol_1: { fa: 'تپانچه P-1',      dmg: 19, cd: 0.28, mag: 12, range: 16, spread: 0.05 },
-  Pistol_2: { fa: 'تپانچه P-2',      dmg: 21, cd: 0.30, mag: 12, range: 16, spread: 0.05 },
-  Sniper_1: { fa: 'تک‌تیرانداز SR-1', dmg: 72, cd: 1.15, mag: 5, range: 42, spread: 0.008, scope: true },
-  Sniper_2: { fa: 'تک‌تیرانداز SR-2', dmg: 66, cd: 1.05, mag: 5, range: 42, spread: 0.010, scope: true },
+  // --- سلاح‌های اصلی بازیکن ---
+  Shotgun: {
+    fa: 'اسلحه سنگین — شاتگان', short: 'شاتگان سنگین', model: 'Shotgun_2', cat: 'weapons2',
+    kind: 'shotgun', dmg: 20, pellets: 8, cd: 0.85, mag: 6, range: 13, spread: 0.16, reloadTime: 2.2,
+  },
+  Colt: {
+    fa: 'کلت — هفت‌تیر', short: 'کلت', model: 'Revolver_2', cat: 'weapons2',
+    kind: 'pistol', dmg: 46, cd: 0.42, mag: 6, range: 20, spread: 0.028, reloadTime: 1.6,
+  },
+  Knife: {
+    fa: 'چاقو', short: 'چاقو', model: 'Knife', cat: 'weapons2',
+    kind: 'melee', dmg: 85, cd: 0.55, mag: Infinity, range: 2.1, spread: 0, silent: true, reloadTime: 0.7,
+  },
+  // --- سلاح‌های تیم‌ها ---
+  AR_1:     { fa: 'تفنگ AR-1',  model: 'AR_1',  cat: 'guns', kind: 'rifle', dmg: 13, cd: 0.13, mag: 30, range: 26, spread: 0.05 },
+  AR_3:     { fa: 'تفنگ AR-3',  model: 'AR_3',  cat: 'guns', kind: 'rifle', dmg: 14, cd: 0.12, mag: 30, range: 26, spread: 0.05 },
+  AR_5:     { fa: 'تفنگ AR-5',  model: 'AR_5',  cat: 'guns', kind: 'rifle', dmg: 11, cd: 0.10, mag: 30, range: 24, spread: 0.06 },
+  SMG_1:    { fa: 'مسلسل SMG-1', model: 'SMG_1', cat: 'guns', kind: 'rifle', dmg: 9,  cd: 0.07, mag: 35, range: 18, spread: 0.08 },
+  SMG_2:    { fa: 'مسلسل SMG-2', model: 'SMG_2', cat: 'guns', kind: 'rifle', dmg: 10, cd: 0.08, mag: 35, range: 18, spread: 0.07 },
+  Pistol_1: { fa: 'تپانچه P-1', model: 'Pistol_1', cat: 'guns', kind: 'pistol', dmg: 19, cd: 0.28, mag: 12, range: 16, spread: 0.05 },
+  Pistol_2: { fa: 'تپانچه P-2', model: 'Pistol_2', cat: 'guns', kind: 'pistol', dmg: 21, cd: 0.30, mag: 12, range: 16, spread: 0.05 },
+  Sniper_1: { fa: 'تک‌تیرانداز SR-1', model: 'Sniper_1', cat: 'guns', kind: 'sniper', dmg: 72, cd: 1.15, mag: 5, range: 42, spread: 0.008, scope: true },
+  Sniper_2: { fa: 'تک‌تیرانداز SR-2', model: 'Sniper_2', cat: 'guns', kind: 'sniper', dmg: 66, cd: 1.05, mag: 5, range: 42, spread: 0.010, scope: true },
 };
+// ترتیب چرخش سلاح برای بازیکن
+const PLAYER_LOADOUT = ['Shotgun', 'Colt', 'Knife'];
 
 // هر تیم ترکیب و توانایی خودش را دارد
 const SWAT_TEAM = [
@@ -61,17 +77,16 @@ renderer.toneMappingExposure = 1.25;
 container.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x03060a);
-scene.fog = new THREE.FogExp2(0x03060a, 0.022);
+scene.background = new THREE.Color(0x010204);
+scene.fog = new THREE.FogExp2(0x010204, 0.055);
 
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 260);
 camera.position.set(0, 26, 16);
 
 // برق قطع است: نور محیط بسیار کم
-scene.add(new THREE.HemisphereLight(0x33465f, 0x05070a, 0.55));
-const moon = new THREE.DirectionalLight(0x7d95c4, 0.35);
-moon.position.set(-18, 40, -12);
-scene.add(moon);
+// تاریکی مطلق: هیچ نور محیطی‌ای وجود ندارد. فقط چراغ‌قوه‌ها و
+// چراغ‌های اضطراری باقی‌مانده چیزی را روشن می‌کنند.
+scene.add(new THREE.AmbientLight(0x0a0f18, 0.32));
 
 /* ------------------------------ لودر ------------------------------ */
 const loader = new GLTFLoader();
@@ -445,19 +460,16 @@ function popLight(pos, peak = 16, life = 0.09, color = 0xffc07a) {
 const emergency = new THREE.PointLight(0xff2b2b, 0, 34, 2);
 emergency.position.set(0, 5, 0); scene.add(emergency);
 
-// چراغ‌های اضطراری کم‌نور (باتری) در نقاط کلیدی شرکت
-const AMBIENT_LAMPS = [
+// چراغ‌های اضطراری باتری‌خور: خیلی کم‌سو و کوچک، فقط برای جهت‌یابی در راهروها
+const EMERGENCY_LAMPS = [
   [-22, -14], [0, -16], [22, -15], [-20, 16], [0, 17], [21, 16], [-10, 0], [12, 0],
 ];
-for (const [x, z] of AMBIENT_LAMPS) {
-  const l = new THREE.PointLight(0x6f8fc8, 2.6, 15, 2);
-  l.position.set(x, 3.4, z);
+for (const [x, z] of EMERGENCY_LAMPS) {
+  const l = new THREE.PointLight(0xd8452f, 1.1, 5.5, 2);
+  l.position.set(x, 3.2, z);
   scene.add(l);
-  const bulb = new THREE.Mesh(
-    new THREE.SphereGeometry(0.12, 8, 6),
-    new THREE.MeshBasicMaterial({ color: 0x9db6e0 })
-  );
-  bulb.position.set(x, 3.6, z);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff7a5a }));
+  bulb.position.set(x, 3.4, z);
   scene.add(bulb);
 }
 
@@ -473,14 +485,67 @@ scene.add(playerG);
 let playerModel = null;
 let aimAngle = 0;
 
-const flashLight = new THREE.SpotLight(0xfff3cc, 7.5, 22, 0.42, 0.45, 1.3);
-flashLight.position.set(0, 1.5, 0.3);
-flashLight.target.position.set(0, 0.6, 8);
-playerG.add(flashLight, flashLight.target);
-// نور کوچک اطراف بازیکن که محیط نزدیک را نشان می‌دهد
-const playerGlow = new THREE.PointLight(0xbcd6ff, 1.6, 7, 2);
-playerGlow.position.set(0, 1.6, 0);
-playerG.add(playerGlow);
+/* -------- چراغ‌قوه‌ی سوار بر اسلحه --------
+   مخروط نور دقیقاً جلوی دهانه اسلحه را روشن می‌کند.
+   با کلیک راست (یا کلید E) روشن/خاموش می‌شود. */
+const lightState = { on: true, battery: 100 };
+
+function buildWeaponLight(parent) {
+  const spot = new THREE.SpotLight(0xfff4d6, 0, 26, 0.30, 0.35, 1.1);
+  spot.position.set(0, 0, 0);
+  spot.target.position.set(0, 0, 14);
+  spot.castShadow = false;
+  parent.add(spot, spot.target);
+  // هاله‌ی کوچک اطراف دهانه که فقط نزدیک را نشان می‌دهد
+  const halo = new THREE.PointLight(0xffe9bb, 0, 4.5, 2);
+  halo.position.set(0, 0.1, 0.5);
+  parent.add(halo);
+  return { spot, halo, target: spot.target };
+}
+
+// نور روی دسته اسلحه بازیکن نصب می‌شود
+const weaponLightGroup = new THREE.Group();
+playerG.add(weaponLightGroup);
+const wLight = buildWeaponLight(weaponLightGroup);
+wLight.spot.angle = 0.30;
+wLight.spot.penumbra = 0.35;
+wLight.spot.distance = 26;
+wLight.spot.intensity = 0;
+wLight.target.position.set(0, 0, 16);
+
+// یک نور ضعیف و خیلی نزدیک به خود بازیکن تا در تاریکی مطلق گم نشود
+const selfGlow = new THREE.PointLight(0x8fb0dd, 0.55, 2.6, 2);
+selfGlow.position.set(0, 1.1, 0);
+playerG.add(selfGlow);
+
+function setFlashlight(on) {
+  lightState.on = on;
+  if (on) beep(1200, 0.04, 'square', 0.02); else beep(500, 0.05, 'square', 0.02);
+  updateHUD();
+}
+function toggleFlashlight() {
+  setFlashlight(!lightState.on);
+  toast(lightState.on ? '🔦 چراغ‌قوه روشن' : '🔦 چراغ‌قوه خاموش — تاریک شد');
+}
+
+// آیا نقطه‌ی p داخل مخروط نور چراغ‌قوه‌ی صاحبش است؟
+function inCone(owner, p, halfAngle, range) {
+  const g = owner.g;
+  const dx = p.x - g.position.x, dz = p.z - g.position.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist > range) return false;
+  const fwd = new THREE.Vector3(Math.sin(g.rotation.y), 0, Math.cos(g.rotation.y));
+  const cos = (dx * fwd.x + dz * fwd.z) / (dist || 1);
+  return cos >= Math.cos(halfAngle);
+}
+// نور چراغ‌قوه‌ی بازیکن روشن است و نقطه در مخروطش قرار دارد؟
+function litByPlayer(p) {
+  return player.alive && lightState.on && inCone(playerActor, p, 0.30, 24);
+}
+// آیا کاراکتر ai (که چراغ‌قوه‌اش روشن است) نقطه‌ی p را می‌بیند؟
+function litByAi(a, p) {
+  return a.alive && inCone(a, p, 0.30, 16);
+}
 
 function tintCharacter(model, team) {
   const base = team === 'swat' ? new THREE.Color(0x1b4c8f) : new THREE.Color(0x8c2418);
@@ -499,27 +564,67 @@ function findBone(root, names) {
   return found;
 }
 
-async function attachGun(charRoot, gunName, offset = new THREE.Vector3(0.05, -0.1, 0.06)) {
+const weaponDef = name => WEAPONS[name] || WEAPONS.AR_1;
+const gunPath = name => {
+  const d = weaponDef(name);
+  return `/models/${d.cat}/${d.model}.glb`;
+};
+
+async function attachGun(charRoot, gunName, offset) {
+  const d = weaponDef(gunName);
   const hand = findBone(charRoot, ['HandR', 'PalmR', 'Hand_R']);
+  const off = offset || new THREE.Vector3(d.kind === 'pistol' ? 0.02 : 0.05, d.kind === 'melee' ? -0.02 : -0.1, 0.06);
   try {
-    const gun = await loadProp('guns', gunName, 1.05, 'length');
+    const gun = await loadProp(d.cat, d.model, d.kind === 'melee' ? 0.62 : d.kind === 'pistol' ? 0.55 : 1.05,
+      d.kind === 'melee' ? 'length' : 'length');
     gun.rotation.set(0, Math.PI / 2, 0);
-    gun.position.copy(offset);
+    gun.position.copy(off);
     const holder = new THREE.Group();
+    holder.name = 'gunHolder';
     holder.add(gun);
     if (hand) hand.add(holder);
     else { holder.position.set(0.45, 1.15, 0.35); charRoot.add(holder); }
-    return gun;
+    holder.userData.gun = gun;
+    return holder;
   } catch { return null; }
 }
 
+let playerGunHolder = null;
 async function buildPlayer() {
   playerModel = await loadCharacter('Swat', 1.8);
   tintCharacter(playerModel, 'swat');
   playerModel.position.y = 0;
   playerG.add(playerModel);
-  await attachGun(playerModel, 'AR_1');
+  await equipWeapon(PLAYER_LOADOUT[0]);
   return playerModel;
+}
+
+// تعویض سلاح بازیکن + نصب چراغ‌قوه روی همان اسلحه
+async function equipWeapon(name) {
+  const d = weaponDef(name);
+  player.weapon = name;
+  player.mag = d.mag === Infinity ? Infinity : d.mag;
+  player.reload = 0;
+  player.cd = 0;
+  // اسلحه قبلی را از دست بردار
+  if (playerGunHolder) {
+    playerGunHolder.parent?.remove(playerGunHolder);
+    if (weaponLightGroup.parent) weaponLightGroup.parent.remove(weaponLightGroup);
+    playerGunHolder = null;
+  }
+  playerGunHolder = await attachGun(playerModel, name);
+  // چراغ‌قوه را سرِ اسلحه سوار کن
+  const anchor = playerGunHolder || playerModel;
+  anchor.add(weaponLightGroup);
+  // مخروط نور از نوک لوله به جلو
+  weaponLightGroup.position.set(0, 0.05, 0);
+  weaponLightGroup.rotation.set(0, 0, 0);
+  wLight.spot.position.set(0, 0, 0.55);
+  wLight.spot.target.position.set(0, -0.12, 15);
+  wLight.halo.position.set(0, 0, 0.7);
+  toast(`🔫 ${d.fa} برداشته شد`);
+  updateHUD();
+  return d;
 }
 
 /* ----------------------------- AI ----------------------------- */
@@ -538,6 +643,24 @@ function makeTag(name, team) {
   drawTag(sp, 1);
   return sp;
 }
+// برچسب فقط وقتی دیده می‌شود که آن کاراکتر در معرض نور باشد
+let lastTagUpdate = 0;
+function updateTagVisibility(t) {
+  if (t - lastTagUpdate < 0.12) return;
+  lastTagUpdate = t;
+  for (const a of actors) {
+    if (!a.alive || !a.tag) continue;
+    if (a.isPlayer) { a.tag.visible = false; continue; }
+    const visible = litByPlayer(a.g.position) || flatDist(a.g.position, playerG.position) < 2.4;
+    a.tag.visible = visible;
+    const ratio = Math.max(0, a.hp / a.maxHp);
+    if (visible && (a.lastRatio === undefined || Math.abs(a.lastRatio - ratio) > 0.01)) {
+      drawTag(a.tag, ratio);
+      a.lastRatio = ratio;
+    }
+  }
+}
+
 function drawTag(sp, ratio) {
   const { ctx, tex, name, team } = sp.userData;
   ctx.clearRect(0, 0, 256, 64);
@@ -566,6 +689,14 @@ async function spawnActor(def, team, pos) {
   tag.position.y = 2.3;
   g.add(tag);
 
+  // چراغ‌قوه‌ی هر کاراکتر — فقط مخروط جلوی اسلحه‌اش را روشن می‌کند
+  const lit = team === 'swat';
+  const aiSpot = new THREE.SpotLight(team === 'swat' ? 0xd6e8ff : 0xffd8c0, lit ? 4.2 : 0, 16, 0.30, 0.4, 1.2);
+  aiSpot.position.set(0, 1.15, 0);
+  aiSpot.target.position.set(0, 0, 10);
+  g.add(aiSpot, aiSpot.target);
+  // تروریست‌ها اکثر وقت‌ها در تاریکی هستند
+
   const a = {
     g, model, tag, team, def, name: def.name, role: def.role,
     hp: def.hp, maxHp: def.hp, alive: true,
@@ -574,7 +705,7 @@ async function spawnActor(def, team, pos) {
     dmg: WEAPONS[def.gun].dmg,
     fireRate: WEAPONS[def.gun].cd * 5.5,
     fireCd: rand(0.4, 1.6), repath: rand(0, 0.3), seed: rand(0, 100),
-    target: null, isPlayer: false,
+    target: null, isPlayer: false, aiSpot, lightOn: lit,
   };
   actors.push(a);
   return a;
@@ -664,34 +795,73 @@ function raycastShot(origin, dir, range, myTeam) {
 function playerShoot() {
   const w = WEAPONS[player.weapon];
   if (!player.alive || player.cd > 0 || player.reload > 0) return;
-  if (player.mag <= 0) { startReload(); return; }
+  if (w.kind !== 'melee' && player.mag <= 0) { startReload(); return; }
   player.cd = w.cd;
-  player.mag--;
+  if (w.kind !== 'melee') player.mag--;
   updateHUD();
 
-  const origin = playerG.position.clone(); origin.y = 1.25;
-  const spread = w.spread * (joyMoving ? 2.2 : 1) * (inSmoke(playerG.position) ? 2.6 : 1);
-  const ang = aimAngle + rand(-spread, spread);
-  const dir = new THREE.Vector3(Math.sin(ang), 0, Math.cos(ang));
-  const hit = raycastShot(origin, dir, w.range, 'swat');
-  spawnTracer(origin, hit.point, 'swat', w.scope ? 0.1 : 0.06);
-  if (hit.actor) {
-    damageActor(hit.actor, w.dmg * rand(0.85, 1.15), playerActor);
-    spawnSpark(hit.point);
-    hitmarker();
-  } else {
-    spawnSpark(hit.point);
+  const origin = playerG.position.clone();
+  origin.y = 1.18;
+  const fwd = new THREE.Vector3(Math.sin(aimAngle), 0, Math.cos(aimAngle));
+  const smokePenalty = inSmoke(playerG.position) ? 2.2 : 1;
+
+  if (w.kind === 'melee') {
+    // چاقو: ضربه در یک کمان کوتاه جلوی بازیکن
+    let hitAny = false;
+    for (const a of actors) {
+      if (!a.alive || a.team === 'swat') continue;
+      const d = flatDist(a.g.position, playerG.position);
+      if (d > w.range) continue;
+      const ang = Math.atan2(a.g.position.x - playerG.position.x, a.g.position.z - playerG.position.z);
+      const diff = Math.abs(((ang - aimAngle + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+      if (diff < 1.15) { damageActor(a, w.dmg, playerActor); hitAny = true; hitmarker(); }
+    }
+    slashArc(w.range, aimAngle, hitAny);
+    beep(hitAny ? 900 : 420, 0.06, 'triangle', 0.03);
+    recoil = 0.7;
+    return;
   }
-  beep(rand(480, 720), 0.04, 'square', 0.03);
-  recoil = 0.5;
-  // تک‌تیرانداز بعد از هر گلوله خشاب می‌زند
+
+  const pellets = w.pellets || 1;
+  const spread = w.spread * (joyMoving ? 1.8 : 1) * smokePenalty;
+  let anyHit = false;
+  for (let i = 0; i < pellets; i++) {
+    const ang = aimAngle + rand(-spread, spread);
+    const dir = new THREE.Vector3(Math.sin(ang), 0, Math.cos(ang));
+    const hit = raycastShot(origin, dir, w.range, 'swat');
+    spawnTracer(origin, hit.point, 'swat', w.kind === 'shotgun' ? 0.05 : w.kind === 'pistol' ? 0.07 : 0.06);
+    if (hit.actor) {
+      const falloff = w.kind === 'shotgun' ? clamp(1.15 - flatDist(origin, hit.point) / w.range, 0.25, 1) : 1;
+      damageActor(hit.actor, w.dmg * falloff * rand(0.85, 1.15), playerActor);
+      spawnSpark(hit.point);
+      anyHit = true;
+    } else spawnSpark(hit.point);
+  }
+  if (anyHit) hitmarker();
+  beep(w.kind === 'shotgun' ? 110 : w.kind === 'pistol' ? 260 : 620, w.kind === 'shotgun' ? 0.16 : 0.05, 'square', w.kind === 'shotgun' ? 0.06 : 0.03);
+  popLight(origin.clone().addScaledVector(fwd, 0.7), w.kind === 'shotgun' ? 26 : 14, 0.08);
+  recoil = w.kind === 'shotgun' ? 1.4 : 0.55;
   if (w.scope) startReload(true);
+  if (w.kind === 'shotgun') shake = Math.max(shake, 0.12);
+}
+
+// کمان ضربه چاقو
+function slashArc(range, angle, hit) {
+  const m = new THREE.Mesh(
+    new THREE.RingGeometry(0.5, range, 18, 1, 0, Math.PI * 0.85),
+    new THREE.MeshBasicMaterial({ color: hit ? 0xffd0c0 : 0xbcd6ff, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false })
+  );
+  m.rotation.x = -Math.PI / 2;
+  m.rotation.z = -angle + Math.PI * 0.42;
+  m.position.set(playerG.position.x, 0.35, playerG.position.z);
+  scene.add(m);
+  effects.push({ mesh: m, t: 0, life: 0.18, kind: 'fade' });
 }
 
 function startReload(quick = false) {
   const w = WEAPONS[player.weapon];
-  if (player.reload > 0 || player.mag === w.mag) return;
-  player.reload = quick ? 0.75 : 1.25;
+  if (w.kind === 'melee' || player.reload > 0 || player.mag === w.mag) return;
+  player.reload = quick ? Math.min(0.8, w.reloadTime) : (w.reloadTime || 1.4);
   toast('🔄 خشاب عوض می‌شود…');
   beep(260, 0.1, 'sine', 0.02);
 }
@@ -708,17 +878,46 @@ function updateAI(a, dt) {
       if (!e.alive || e.team === a.team) continue;
       const d = flatDist(a.g.position, e.g.position);
       if (d < bestD) { bestD = d; best = e; }
-      if (d < 24 && d < visD && hasLineOfSight(a.g.position, e.g.position)) { visD = d; visible = e; }
+      // دید در تاریکی: یا خودم با چراغ‌قوه او را روشن کرده‌ام،
+      // یا او چراغ‌قوه‌اش روشن است و مرا روشن می‌کند،
+      // یا در فاصله‌ی خیلی نزدیک (شنیدن صدای نفس!) هستیم.
+      const spotted = hasLineOfSight(a.g.position, e.g.position) &&
+        (litByAi(a, e.g.position) || (e.isPlayer && litByPlayer(a.g.position)) || d < 2.6);
+      if (d < visD && spotted) { visD = d; visible = e; }
     }
-    a.target = visible || best;
+    // اگر کسی دیده نشود، تنها جهت تقریبی آخرین هدف را نگه می‌داریم
+    a.target = visible || null;
+    a.lastKnown = best || null;
   }
-  if (!a.target) { playAnim(a.model, ['Idle_Neutral', 'Idle'], 0.2); return; }
+  if (!a.target) {
+    // در تاریکی سرگردان می‌شود (بدون دید واقعی)
+    playAnim(a.model, ['Idle_Neutral', 'Idle'], 0.2);
+    if (a.wanderCd === undefined) a.wanderCd = rand(0.5, 2);
+    a.wanderCd -= dt;
+    if (a.wanderCd <= 0) {
+      a.wanderCd = rand(2.5, 5);
+      a.wanderDir = rand(-Math.PI, Math.PI);
+    }
+    if (a.wanderDir !== undefined) {
+      const step = a.speed * 0.45 * dt;
+      a.g.position.x += Math.sin(a.wanderDir) * step;
+      a.g.position.z += Math.cos(a.wanderDir) * step;
+      a.g.rotation.y = a.wanderDir;
+      const before = a.g.position.clone();
+      resolveCollision(a.g.position, 0.55);
+      if (a.g.position.distanceTo(before) < step * 0.3) a.wanderDir = rand(-Math.PI, Math.PI);
+      playAnim(a.model, ['Walk'], 0.2);
+    }
+    return;
+  }
 
   const t = a.target.g.position;
   const d = flatDist(a.g.position, t);
   a.g.rotation.y = Math.atan2(t.x - a.g.position.x, t.z - a.g.position.z);
 
-  const seen = d < 24 && hasLineOfSight(a.g.position, t);
+  const seen = true;   // target فقط وقتی ست می‌شود که دیده شده باشد
+  // در تاریکی مطلق اگر هدف چراغ‌قوه‌اش را خاموش کند، دیگر دیده نمی‌شود
+  a.spotTimer = (a.spotTimer || 0) - dt;
   const want = a.role === 'تک‌تیرانداز' ? 15 : a.role === 'پشتیبان' ? 9 : 6;
   let moving = false;
   if (!seen || d > want) {
@@ -910,17 +1109,33 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyR') startReload();
   if (e.code === 'KeyQ') throwGrenade('grenade');
   if (e.code === 'KeyF') throwGrenade('smoke');
-  if (e.code === 'KeyE') { flashLight.visible = !flashLight.visible; toast(flashLight.visible ? '🔦 چراغ‌قوه روشن' : '🔦 چراغ‌قوه خاموش'); }
+  if (e.code === 'KeyE') toggleFlashlight();
+  if (e.code === 'Digit1') equipWeapon('Shotgun');
+  if (e.code === 'Digit2') equipWeapon('Colt');
+  if (e.code === 'Digit3') equipWeapon('Knife');
   if (e.code === 'Tab') { e.preventDefault(); toggleBoard(); }
   if (e.code === 'Escape') closePanels();
   if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
 addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
-renderer.domElement.addEventListener('mousedown', e => { if (e.button === 0) mouseDown = true; });
+renderer.domElement.addEventListener('mousedown', e => {
+  if (e.button === 0) mouseDown = true;
+  if (e.button === 2) { e.preventDefault(); toggleFlashlight(); }   // کلیک راست = چراغ‌قوه
+});
 addEventListener('mouseup', () => mouseDown = false);
 addEventListener('contextmenu', e => { if (e.target === renderer.domElement) e.preventDefault(); });
-addEventListener('wheel', e => { if (!galleryOpen) camZoom = clamp(camZoom + e.deltaY * 0.02, 16, 44); }, { passive: true });
+addEventListener('wheel', e => {
+  if (galleryOpen) return;
+  if (e.shiftKey) {
+    // Shift + چرخ = تعویض سلاح
+    const i = PLAYER_LOADOUT.indexOf(player.weapon);
+    const n = (i + (e.deltaY > 0 ? 1 : -1) + PLAYER_LOADOUT.length) % PLAYER_LOADOUT.length;
+    equipWeapon(PLAYER_LOADOUT[n]);
+  } else {
+    camZoom = clamp(camZoom + e.deltaY * 0.02, 16, 44);
+  }
+}, { passive: true });
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
@@ -945,6 +1160,7 @@ addEventListener('touchend', e => {
 const fireBtn = document.getElementById('firebtn');
 fireBtn.addEventListener('touchstart', e => { joyFire = true; e.preventDefault(); }, { passive: false });
 fireBtn.addEventListener('touchend', () => { joyFire = false; });
+document.querySelectorAll('.slot').forEach(b => { b.onclick = () => equipWeapon(b.dataset.w); });
 document.getElementById('grenbtn').onclick = () => throwGrenade('grenade');
 document.getElementById('smokebtn').onclick = () => throwGrenade('smoke');
 
@@ -958,7 +1174,13 @@ function updateHUD() {
   document.getElementById('hptext').textContent = faNum(Math.max(0, player.hp));
   document.getElementById('armorfill').style.width = Math.max(0, player.armor) + '%';
   document.getElementById('armortext').textContent = faNum(Math.max(0, player.armor));
-  document.getElementById('magtext').textContent = `${faNum(player.mag)} / ${faNum(WEAPONS[player.weapon].mag)}`;
+  const w = WEAPONS[player.weapon];
+  const magTxt = w.kind === 'melee' ? '∞' : faNum(player.mag);
+  const capTxt = w.mag === Infinity ? '∞' : faNum(w.mag);
+  document.getElementById('magtext').textContent = `${magTxt} / ${capTxt}`;
+  document.getElementById('torchstate').textContent = lightState.on ? 'روشن' : 'خاموش';
+  document.getElementById('torchstate').className = lightState.on ? 'on' : 'off';
+  document.querySelectorAll('.slot').forEach(b => b.classList.toggle('active', b.dataset.w === player.weapon));
   document.getElementById('wepname').textContent = WEAPONS[player.weapon].fa;
   document.getElementById('ammoG').textContent = faNum(player.ammo.grenade);
   document.getElementById('ammoS').textContent = faNum(player.ammo.smoke);
@@ -1025,10 +1247,14 @@ function drawMinimap() {
     mm.arc(px(s.group.position), pz(s.group.position), s.radius / TILE * CW, 0, 7);
     mm.fill();
   }
+  // در تاریکی، مینی‌مپ فقط چیزهایی را نشان می‌دهد که چراغ‌قوه‌ی بازیکن روشن کرده
   for (const a of actors) {
     if (a.isPlayer || !a.alive) continue;
+    const seen = litByPlayer(a.g.position) || flatDist(a.g.position, playerG.position) < 2.6;
+    if (!seen) continue;
     mm.fillStyle = a.team === 'swat' ? '#4aa8ff' : '#ff5a3c';
-    mm.beginPath(); mm.arc(px(a.g.position), pz(a.g.position), 3.2, 0, 7); mm.fill();
+    mm.beginPath(); mm.arc(px(a.g.position), pz(a.g.position), 3.4, 0, 7); mm.fill();
+    mm.strokeStyle = 'rgba(255,255,255,.5)'; mm.lineWidth = 1; mm.stroke();
   }
   // مخروط چراغ‌قوه بازیکن
   const cx = px(playerG.position), cy = pz(playerG.position);
@@ -1055,9 +1281,17 @@ const gSpot = new THREE.SpotLight(0xffffff, 120, 30, 0.55, 0.5);
 gSpot.position.set(GPOS.x + 5, 8, GPOS.z + 5);
 gSpot.visible = false; scene.add(gSpot);
 
+const GALLERY_NAMES = {
+  Shotgun_1: 'شاتگان سنگین ۱', Shotgun_2: 'شاتگان سنگین ۲', Shotgun_SawedOff: 'شاتگان کوتاه',
+  Shotgun_ShortStock: 'شاتگان دسته‌کوتاه', Revolver_1: 'هفت‌تیر ۱', Revolver_2: 'کلت هفت‌تیر',
+  Revolver_3: 'هفت‌تیر فلزی', Knife: 'چاقو', Torch: 'مشعل', AR_1: 'تفنگ AR-1', AR_3: 'تفنگ AR-3',
+  AR_5: 'تفنگ AR-5', SMG_1: 'مسلسل SMG-1', SMG_2: 'مسلسل SMG-2', Pistol_1: 'تپانچه ۱',
+  Sniper_1: 'تک‌تیرانداز ۱', Sniper_2: 'تک‌تیرانداز ۲', Grenade_1: 'نارنجک', Grenade_2: 'نارنجک دود',
+};
 const GALLERY = [
   { cat: 'team', title: '🧍 کاراکترهای تیم‌ها', list: ['Swat', 'Worker', 'Suit', 'Casual', 'Punk', 'CyberCharacter', 'Spacesuit', 'Casual2', 'Beach', 'Adventurer'] },
-  { cat: 'guns', title: '🔫 سلاح‌ها و نارنجک', list: ['AR_1', 'AR_3', 'AR_5', 'SMG_1', 'SMG_2', 'Pistol_1', 'Sniper_1', 'Sniper_2', 'Grenade_1', 'Grenade_2'] },
+  { cat: 'weapons2', title: '🔫 اسلحه‌های بازیکن (سنگین/کلت/چاقو)', list: ['Shotgun_1', 'Shotgun_2', 'Shotgun_SawedOff', 'Shotgun_ShortStock', 'Revolver_1', 'Revolver_2', 'Revolver_3', 'Pistol_1', 'Pistol_2', 'Knife', 'Torch'] },
+  { cat: 'guns', title: '🔫 سلاح‌های تیم‌ها و نارنجک', list: ['AR_1', 'AR_3', 'AR_5', 'SMG_1', 'SMG_2', 'Pistol_1', 'Sniper_1', 'Sniper_2', 'Grenade_1', 'Grenade_2'] },
   { cat: 'office', title: '🏢 ساختمان شرکت', list: ['FloorTile_Basic', 'Wall_1', 'Wall_4', 'DoorSingle_Wall_SideA', 'Door_Double', 'Window_Wall_SideA', 'Column_1', 'Staircase', 'RoofTile_Plate'] },
   { cat: 'office', title: '🪑 تجهیزات و مبلمان', list: ['Couch_Large1', 'Chair_1', 'Table_RoundLarge', 'Bookshelf', 'Props_Shelf_Tall', 'Computer_Large', 'Computer', 'TV_1', 'Kitchen_Fridge', 'Props_Teleporter_1', 'Props_Capsule', 'Props_Pod', 'Props_Laser', 'Houseplant_1', 'Light_Ceiling1', 'Carpet_1'] },
 ];
@@ -1070,7 +1304,7 @@ function buildGalleryUI() {
     for (const n of grp.list) {
       const b = document.createElement('button');
       b.className = 'gitem';
-      b.textContent = WEAPONS[n]?.fa || n;
+      b.textContent = WEAPONS[n]?.fa || GALLERY_NAMES[n] || n;
       b.onclick = () => {
         document.querySelectorAll('.gitem').forEach(x => x.classList.remove('sel'));
         b.classList.add('sel');
@@ -1081,15 +1315,19 @@ function buildGalleryUI() {
   }
 }
 async function showInGallery(cat, name) {
-  document.getElementById('gname').textContent = WEAPONS[name]?.fa || name;
+  document.getElementById('gname').textContent = WEAPONS[name]?.fa || GALLERY_NAMES[name] || name;
   if (gModel) { scene.remove(gModel); gModel = null; }
   if (cat === 'team') {
     gModel = await loadCharacter(name, 2.9);
     const idle = findClip(Object.values(gModel.userData.actions).map(a => a.getClip()), ['Idle_Neutral', 'Idle', 'Idle_Gun_Pointing']);
     if (idle) { gModel.userData.actions[idle.name].play(); gModel.userData.current = idle.name; }
     gModel.position.set(GPOS.x, 0.4, GPOS.z);
+  } else if (cat === 'guns' || cat === 'weapons2') {
+    const d = WEAPONS[name];
+    gModel = await loadProp(d ? d.cat : cat, d ? d.model : name, d?.kind === 'melee' ? 2.4 : 3.2, 'length');
+    gModel.position.set(GPOS.x, 0.4, GPOS.z);
   } else {
-    gModel = await loadProp(cat, name, cat === 'guns' ? 3.2 : 2.9, cat === 'guns' ? 'length' : 'height');
+    gModel = await loadProp(cat, name, 2.9, 'height');
     gModel.position.set(GPOS.x, 0.4, GPOS.z);
   }
   scene.add(gModel);
@@ -1211,8 +1449,7 @@ async function startRound() {
     playerTag.position.y = 2.3;
     playerG.add(playerTag);
   }
-  playerTag.visible = true;
-  drawTag(playerTag, 1);
+  playerTag.visible = false;
   const pTag = playerTag;
   playerActor = {
     g: playerG, model: playerModel, tag: pTag, team: 'swat', name: 'تو (سوات)', role: 'فرمانده',
@@ -1353,6 +1590,31 @@ function animate() {
   const pulse = (Math.sin(t * 1.4) + 1) / 2;
   emergency.intensity = pulse > 0.93 ? 30 : pulse > 0.86 ? 7 : 0;
   emergency.position.set(Math.sin(t * 0.11) * 9, 5, Math.cos(t * 0.13) * 7);
+
+  // ---- چراغ‌قوه‌ها ----
+  // نور بازیکن: اگر روشن است انرژی دارد، اگر خاموش است صفر
+  const targetI = lightState.on ? 26 : 0;
+  wLight.spot.intensity += (targetI - wLight.spot.intensity) * Math.min(1, dt * 14);
+  // لرزش خیلی کم نور همراه با حرکت (دست لرزان)
+  wLight.spot.position.x = Math.sin(t * 6) * (joyMoving ? 0.035 : 0.012);
+  wLight.spot.position.y = 0.55 + Math.sin(t * 4.3) * 0.012;
+  wLight.halo.intensity += ((lightState.on ? 1.4 : 0) - wLight.halo.intensity) * Math.min(1, dt * 12);
+  selfGlow.visible = lightState.on;
+
+  // چراغ‌قوه ai: سوات‌ها روشن، تروریست‌ها گاهی روشن می‌شوند
+  for (const a of actors) {
+    if (a.isPlayer || !a.aiSpot) continue;
+    if (a.lightOn === undefined) a.lightOn = a.team === 'swat';
+    if (a.team === 'terror') {
+      if (!a.lightOn && Math.random() < dt * 0.02) { a.lightOn = true; a.lightTimer = 5; }
+      if (a.lightOn) {
+        a.lightTimer = (a.lightTimer ?? 5) - dt;
+        if (a.lightTimer <= 0) a.lightOn = false;
+      }
+    }
+    a.aiSpot.intensity += ((a.lightOn && a.alive ? 4.2 : 0) - a.aiSpot.intensity) * Math.min(1, dt * 8);
+  }
+  updateTagVisibility(t);
 
   // شارژ آرام زره
   if (player.alive && player.armor < player.maxArmor) player.armor = Math.min(player.maxArmor, player.armor + dt * 3);

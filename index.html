@@ -63,6 +63,22 @@
   .abtn b { position:relative; z-index:1; }
   .abtn .n { position:relative; z-index:1; background:rgba(255,255,255,.16); border-radius:5px; padding:0 5px; font-size:10px; }
 
+  #slots { display:flex; gap:6px; margin-top:9px; }
+  .slot {
+    flex:1; pointer-events:auto; cursor:pointer; padding:7px 4px; border-radius:9px;
+    background:rgba(16,28,42,.85); border:1px solid rgba(120,170,230,.16);
+    color:#c9d9ea; font-family:inherit; font-size:11px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; gap:4px;
+  }
+  .slot b { background:rgba(255,255,255,.14); border-radius:4px; padding:0 4px; font-size:10px; }
+  .slot.active { background:rgba(38,96,170,.65); border-color:#4aa8ff; color:#fff; box-shadow:0 0 12px rgba(74,168,255,.35); }
+  #torch { display:flex; align-items:center; gap:7px; margin-top:9px; font-size:11px; }
+  #torch .tlabel { opacity:.75; }
+  #torchstate { font-weight:900; }
+  #torchstate.on { color:#ffe08a; text-shadow:0 0 10px rgba(255,224,138,.6); }
+  #torchstate.off { color:#6b7a8c; }
+  #torch .thint { margin-inline-start:auto; opacity:.45; font-size:10px; }
+
   /* نقشه کوچک */
   #mapwrap { position:absolute; bottom:14px; left:50%; transform:translateX(-50%); padding:7px; }
   #minimap { display:block; width:150px; border-radius:8px; }
@@ -210,8 +226,18 @@
   <div id="weapons" class="panel">
     <div id="wepname">تفنگ مهاجم AR-1</div>
     <div id="wepinfo">
-      <span id="magtext">30 / 30</span>
-      <span style="font-size:11px;opacity:.6">R = خشاب | E = چراغ‌قوه</span>
+      <span id="magtext">6 / 6</span>
+      <span style="font-size:11px;opacity:.65">R = خشاب</span>
+    </div>
+    <div id="slots">
+      <button class="slot active" data-w="Shotgun"><b>۱</b> شاتگان</button>
+      <button class="slot" data-w="Colt"><b>۲</b> کلت</button>
+      <button class="slot" data-w="Knife"><b>۳</b> چاقو</button>
+    </div>
+    <div id="torch">
+      <span class="tlabel">🔦 چراغ‌قوه</span>
+      <span id="torchstate" class="on">روشن</span>
+      <span class="thint">کلیک راست / E</span>
     </div>
     <div class="wep-actions">
       <button class="abtn" id="grenbtn"><div class="cd" id="cdG"></div><b>💣 نارنجک Q</b><span class="n" id="ammoG">3</span></button>
@@ -267,6 +293,9 @@
     <div class="t">نبرد شرکت</div>
     <div class="s">سوات vs تروریست — برق قطع است</div>
     <div id="loadmsg">در حال بارگذاری…</div>
+    <div style="margin-top:22px;font-size:11.5px;line-height:2;opacity:.55">
+      کلیک راست یا E = چراغ‌قوه &nbsp;•&nbsp; ۱ / ۲ / ۳ = شاتگان سنگین / کلت / چاقو
+    </div>
   </div>
 </div>
 
