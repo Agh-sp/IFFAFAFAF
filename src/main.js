@@ -104,6 +104,10 @@ const pathOf = (cat, name) => `/models/${cat}/${name}.glb`;
 
 function bboxOf(o) { o.updateMatrixWorld(true); return new THREE.Box3().setFromObject(o); }
 
+// هیچ مدلی نباید غول‌آسا شود. مدل‌هایی مثل کابل در محور Y کشیده‌اند و
+// اگر فقط ابعاد افقی نرمال شود، ارتفاعشان چند ده متر می‌شود.
+const MAX_PROP_HEIGHT = 5.5;
+
 function prep(src, target, mode = 'height') {
   const rigged = src.clips.length > 0;
   const root = rigged ? SkeletonUtils.clone(src.scene) : src.scene.clone(true);
@@ -113,6 +117,10 @@ function prep(src, target, mode = 'height') {
   const b = bboxOf(root), s = b.getSize(new THREE.Vector3());
   const dim = mode === 'footprint' ? Math.max(s.x, s.z) : mode === 'length' ? Math.max(s.x, s.y, s.z) : s.y;
   root.scale.multiplyScalar(target / (dim || 1));
+  bboxOf(root);
+  // گارد ارتفاع: اگر هنوز بلندتر از حد است، دوباره کوچک کن
+  const h = bboxOf(root).getSize(new THREE.Vector3()).y;
+  if (h > MAX_PROP_HEIGHT) root.scale.multiplyScalar(MAX_PROP_HEIGHT / h);
   bboxOf(root);
   root.userData.baseY = -bboxOf(root).min.y;
   return root;
@@ -168,7 +176,11 @@ function loadCharacter(modelName, target = 1.8) {
     const root = gltf.scene;
     root.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
     const b = bboxOf(root), s = b.getSize(new THREE.Vector3());
-    root.scale.multiplyScalar(target / s.y);
+    root.scale.multiplyScalar(target / (s.y || 1));
+    bboxOf(root);
+    // کاراکتر باید دقیقاً ۱.۸ متر باشد؛ اگر مدل عجیب بود، دوباره نرمال کن
+    const hNow = bboxOf(root).getSize(new THREE.Vector3()).y;
+    if (Math.abs(hNow - target) > 0.35) root.scale.multiplyScalar(target / (hNow || 1));
     bboxOf(root);
     root.userData.baseY = -bboxOf(root).min.y;
 
@@ -332,6 +344,12 @@ function normalizedGeometry(gltf, target, mode = 'footprint') {
   geo.translate(-cx, -by, -cz);
   geo.scale(k, k, k);
   geo.computeBoundingBox();
+  const h = geo.boundingBox.max.y;
+  if (h > MAX_PROP_HEIGHT) {
+    const k2 = MAX_PROP_HEIGHT / h;
+    geo.scale(k2, k2, k2);
+    geo.computeBoundingBox();
+  }
   return { geo, mat: mesh.material, height: geo.boundingBox.max.y };
 }
 
@@ -406,7 +424,7 @@ const FURNITURE = [
   { n: 'Props_Computer', x: 24.6, z: -12.4, r: -0.5, s: 1.1 },
   { n: 'Props_Crate', x: 17.5, z: -12.4, r: 0.3, s: 1.3 },
   { n: 'Props_Pod', x: 26.4, z: -19.4, r: 0, s: 2.0 },
-  { n: 'Cable_Long', x: 23, z: -9.8, r: 0, s: 3.4, mode: 'footprint', flat: true },
+  { n: 'Cable_Long', x: 23, z: -9.8, r: 0, s: 3.4, mode: 'length', flat: true },
   { n: 'Props_ContainerFull', x: 27.6, z: -15, r: 0, s: 2.0 },
   // فضای باز کارمندان (وسط)
   { n: 'Computer_Large', x: -8, z: 2.4, r: 0, s: 1.8 },
@@ -466,6 +484,13 @@ async function buildFurniture() {
       else if (f.ceiling) m.position.y = f.ceiling;
       else m.position.y += m.userData.baseY + FLOOR_Y;
       if (f.onWall) m.position.y = f.wallOffset || 0.5;
+      // اگر مدل هنوز غیرمنطقی بزرگ است، اصلاً نمایش نده (جلوگیری از پوشاندن صفحه)
+      const sizeNow = bboxOf(m).getSize(new THREE.Vector3());
+      if (sizeNow.y > MAX_PROP_HEIGHT + 0.5 || Math.max(sizeNow.x, sizeNow.z) > 12) {
+        console.warn('مدل خیلی بزرگ، حذف شد:', f.n, sizeNow.toArray().map(v => v.toFixed(1)));
+        scene.remove(m);
+        return;
+      }
       scene.add(m);
       if (!f.flat && !f.ceiling) PROP_COLLIDERS.push({ x: f.x, z: f.z, r: f.s * 0.28 });
     } catch (e) { console.warn('furniture', f.n, e); }
@@ -603,8 +628,8 @@ async function attachGun(charRoot, gunName, offset) {
   const hand = findBone(charRoot, ['HandR', 'PalmR', 'Hand_R']);
   const off = offset || new THREE.Vector3(d.kind === 'pistol' ? 0.02 : 0.05, d.kind === 'melee' ? -0.02 : -0.1, 0.06);
   try {
-    const gun = await loadProp(d.cat, d.model, d.kind === 'melee' ? 0.62 : d.kind === 'pistol' ? 0.55 : 1.05,
-      d.kind === 'melee' ? 'length' : 'length');
+    // اسلحه با بزرگ‌ترین بُعد نرمال می‌شود تا هرگز از دست بزرگ‌تر نشود
+    const gun = await loadProp(d.cat, d.model, d.kind === 'melee' ? 0.55 : d.kind === 'pistol' ? 0.5 : 0.95, 'length');
     // جهت‌دهی لوله به سمت جلو (محور +Z کاراکتر) و کمی مایل به پایین
     gun.rotation.set(0, Math.PI / 2, 0);
     if (d.kind === 'melee') gun.rotation.set(Math.PI / 2, 0, Math.PI);
@@ -1621,7 +1646,23 @@ function updateDebug(dt) {
     `بازیگران زنده: ${alive}  |  خشاب: ${player.mag}\n` +
     `مه: ${scene.fog ? scene.fog.density : 'خاموش'}  |  نقاط نور: ${lightsInScene()}\n` +
     `روشنایی محیط: ${ambientLight.intensity.toFixed(2)}  بالاسری: ${overhead.intensity.toFixed(2)}\n` +
-    `ارتفاع بازیکن: ${playerG.position.y.toFixed(2)}  |  قفل: ${document.pointerLockElement ? 'بله' : 'خیر'}`;
+    `ارتفاع بازیکن: ${playerG.position.y.toFixed(2)}  |  قفل: ${document.pointerLockElement ? 'بله' : 'خیر'}\n` +
+    `بزرگ‌ترین اجسام:\n              ${biggestObjects(3)}`;
+}
+
+// بزرگ‌ترین مدل‌های صحنه: ابزار تشخیص مدل‌های غول‌آسا
+function biggestObjects(n = 3) {
+  const list = [];
+  scene.traverse(o => {
+    if (!o.isMesh || !o.visible) return;
+    const box = new THREE.Box3().setFromObject(o);
+    const s = box.getSize(new THREE.Vector3());
+    const m = Math.max(s.x, s.y, s.z);
+    if (m > 1) list.push({ name: o.name || o.parent?.name || '?', size: s, max: m });
+  });
+  return list.sort((a, b) => b.max - a.max).slice(0, n)
+    .map(o => `${o.name.slice(0, 14)} ${o.size.x.toFixed(1)}x${o.size.y.toFixed(1)}x${o.size.z.toFixed(1)}`)
+    .join('\n              ');
 }
 
 function lightsInScene() {
