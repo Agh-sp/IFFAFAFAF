@@ -1,104 +1,278 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>روستای سه‌بعدی — بازی از نمای بالا</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&display=swap" rel="stylesheet" />
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    html,body { width:100%; height:100%; overflow:hidden; background:#0b1a12; font-family:'Vazirmatn',Tahoma,sans-serif; }
-    #game { position:fixed; inset:0; }
-    canvas { display:block; }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>نبرد شرکت — سوات vs تروریست</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&display=swap" rel="stylesheet" />
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#03060a; font-family:'Vazirmatn',Tahoma,sans-serif; color:#e8eef6; }
+  #game { position:fixed; inset:0; }
+  canvas { display:block; }
 
-    /* ---------- HUD ---------- */
-    #hud { position:fixed; inset:0; pointer-events:none; z-index:10; color:#fff; }
-    .panel { background:rgba(8,20,14,.72); border:1px solid rgba(255,255,255,.14); border-radius:14px; backdrop-filter:blur(6px); }
-    #topbar { position:absolute; top:12px; right:12px; left:12px; display:flex; gap:10px; align-items:center; justify-content:space-between; }
-    #stats { display:flex; gap:10px; align-items:center; padding:8px 14px; }
-    .stat { display:flex; align-items:center; gap:6px; font-weight:700; font-size:15px; }
-    .stat small { opacity:.65; font-weight:400; font-size:12px; }
-    #hpwrap { width:170px; height:14px; background:rgba(255,255,255,.15); border-radius:8px; overflow:hidden; border:1px solid rgba(255,255,255,.25); }
-    #hpfill { height:100%; width:100%; background:linear-gradient(90deg,#ff5a4e,#ffb03a); transition:width .2s; }
-    #weaponbox { padding:8px 14px; text-align:center; min-width:150px; }
-    #weaponname { font-weight:900; font-size:16px; color:#ffd76a; }
-    #weaponhint { font-size:11px; opacity:.7; }
-    #minimap { width:150px; height:150px; border-radius:12px; border:1px solid rgba(255,255,255,.25); background:#1d3a24; }
-    .btn { pointer-events:auto; cursor:pointer; border:none; border-radius:12px; padding:10px 16px; font-family:inherit; font-weight:900; font-size:14px; color:#0b1a12; background:linear-gradient(180deg,#ffe27a,#ffb03a); box-shadow:0 4px 14px rgba(0,0,0,.4); }
-    .btn:hover { filter:brightness(1.08); }
-    .btn.ghost { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.3); }
+  /* ---------------- HUD کلی ---------------- */
+  #hud { position:fixed; inset:0; pointer-events:none; z-index:10; }
+  .panel { background:rgba(6,12,20,.74); border:1px solid rgba(120,170,230,.18); border-radius:14px; backdrop-filter:blur(8px); box-shadow:0 8px 28px rgba(0,0,0,.5); }
 
-    #prompt { position:absolute; bottom:110px; left:50%; transform:translateX(-50%); padding:10px 20px; font-weight:900; font-size:16px; display:none; }
-    #prompt b { color:#ffd76a; }
-    #toast { position:absolute; top:84px; left:50%; transform:translateX(-50%); padding:8px 18px; font-weight:700; display:none; }
-    #help { position:absolute; bottom:12px; right:12px; padding:10px 14px; font-size:12.5px; line-height:1.9; opacity:.95; }
-    #help kbd { background:rgba(255,255,255,.18); border-radius:5px; padding:1px 7px; font-family:inherit; font-weight:700; }
-    #loading { position:fixed; inset:0; z-index:50; background:#0b1a12; color:#fff; display:flex; flex-direction:column; gap:14px; align-items:center; justify-content:center; }
-    .spin { width:52px; height:52px; border:5px solid rgba(255,255,255,.15); border-top-color:#ffd76a; border-radius:50%; animation:sp 1s linear infinite; }
-    @keyframes sp { to { transform:rotate(360deg); } }
+  /* نوار بالا: وضعیت دو تیم */
+  #top { position:absolute; top:10px; left:10px; right:10px; display:flex; gap:10px; align-items:flex-start; justify-content:space-between; }
+  .teambox { padding:8px 12px; min-width:190px; }
+  .teambox .head { display:flex; align-items:center; gap:7px; font-weight:900; font-size:14px; margin-bottom:6px; }
+  .dot { width:9px; height:9px; border-radius:50%; }
+  .blue .dot, .dot.blue { background:#4aa8ff; box-shadow:0 0 10px #4aa8ff; }
+  .red .dot, .dot.red { background:#ff5a3c; box-shadow:0 0 10px #ff5a3c; }
+  .teambox .bar { height:7px; border-radius:6px; background:rgba(255,255,255,.12); overflow:hidden; }
+  .teambox .bar i { display:block; height:100%; width:100%; transition:width .35s; }
+  .teambox.blue .bar i { background:linear-gradient(90deg,#2f7ddd,#7cc4ff); }
+  .teambox.red .bar i { background:linear-gradient(90deg,#c2351c,#ff8a6a); }
+  .teambox .info { display:flex; justify-content:space-between; font-size:12px; margin-top:5px; opacity:.85; }
+  .teambox .info b { color:#ffd76a; }
 
-    /* ---------- Gallery ---------- */
-    #gallery { position:fixed; inset:0; z-index:20; display:none; background:rgba(5,12,8,.55); }
-    #gallery.open { display:block; }
-    #gpanel { position:absolute; top:12px; bottom:12px; right:12px; width:300px; padding:14px; overflow-y:auto; }
-    #gpanel h2 { font-size:17px; margin-bottom:4px; color:#ffd76a; }
-    #gpanel p { font-size:12px; opacity:.75; margin-bottom:12px; line-height:1.8; }
-    .ggroup { font-weight:900; font-size:13px; color:#9fe8b0; margin:12px 0 6px; }
-    .gitem { display:block; width:100%; text-align:right; background:rgba(255,255,255,.07); color:#fff; border:1px solid rgba(255,255,255,.1); border-radius:9px; padding:7px 10px; margin-bottom:5px; cursor:pointer; font-family:inherit; font-size:13px; }
-    .gitem:hover, .gitem.sel { background:rgba(255,215,106,.22); border-color:#ffd76a; }
-    #ginfo { position:absolute; bottom:14px; left:50%; transform:translateX(-50%); padding:10px 18px; text-align:center; }
-    #gname { font-weight:900; font-size:17px; color:#ffd76a; }
-    #ghint { font-size:12px; opacity:.75; }
-    #gclose { position:absolute; top:12px; left:12px; }
+  #midinfo { text-align:center; padding:7px 16px; }
+  #midinfo .r { font-size:13px; font-weight:900; letter-spacing:.5px; }
+  #midinfo .power { font-size:11px; color:#ff8b6a; margin-top:3px; }
+  #midinfo .power i { display:inline-block; width:7px; height:7px; border-radius:50%; background:#ff3b30; margin-inline-end:4px; animation:blink 1.4s infinite; }
+  @keyframes blink { 0%,100%{opacity:.15} 50%{opacity:1} }
 
-    /* ---------- Mobile controls ---------- */
-    #joy { position:fixed; bottom:26px; right:26px; width:120px; height:120px; border-radius:50%; background:rgba(255,255,255,.08); border:2px solid rgba(255,255,255,.25); z-index:15; display:none; touch-action:none; }
-    #joyknob { position:absolute; width:52px; height:52px; border-radius:50%; background:rgba(255,255,255,.35); top:34px; right:34px; }
-    #atkbtn { position:fixed; bottom:40px; left:26px; width:86px; height:86px; border-radius:50%; z-index:15; display:none; font-size:15px; }
-    @media (pointer:coarse) { #joy, #atkbtn { display:block; } #help { display:none; } }
-  </style>
+  /* سلامت و مهمات — پایین راست (RTL: چپ بصری) */
+  #health { position:absolute; bottom:14px; right:14px; padding:10px 14px; width:230px; }
+  #health .row { display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:12px; }
+  #health .row span { width:34px; opacity:.8; }
+  .track { flex:1; height:10px; border-radius:6px; background:rgba(255,255,255,.13); overflow:hidden; }
+  .track i { display:block; height:100%; transition:width .2s; }
+  #hpfill { background:linear-gradient(90deg,#d8352a,#ff8d78); }
+  #armorfill { background:linear-gradient(90deg,#2c73c9,#7dc6ff); }
+  #health .num { font-size:11px; width:34px; text-align:left; opacity:.9; }
+
+  /* سلاح — پایین چپ */
+  #weapons { position:absolute; bottom:14px; left:14px; padding:10px 14px; min-width:260px; }
+  #wepname { font-size:13px; font-weight:900; color:#ffe9a8; }
+  #wepinfo { display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:13px; }
+  #magtext { font-weight:900; letter-spacing:.5px; }
+  .wep-actions { display:flex; gap:8px; margin-top:9px; }
+  .abtn {
+    pointer-events:auto; cursor:pointer; flex:1; position:relative; overflow:hidden;
+    border:1px solid rgba(140,190,255,.28); background:rgba(20,34,52,.9); color:#dce9f8;
+    border-radius:10px; padding:7px 6px; font-family:inherit; font-size:11px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; gap:5px;
+  }
+  .abtn:active { transform:scale(.96); }
+  .abtn .cd { position:absolute; bottom:0; left:0; right:0; background:rgba(90,160,255,.32); height:0%; transition:height .1s; }
+  .abtn b { position:relative; z-index:1; }
+  .abtn .n { position:relative; z-index:1; background:rgba(255,255,255,.16); border-radius:5px; padding:0 5px; font-size:10px; }
+
+  /* نقشه کوچک */
+  #mapwrap { position:absolute; bottom:14px; left:50%; transform:translateX(-50%); padding:7px; }
+  #minimap { display:block; width:150px; border-radius:8px; }
+  #mapwrap .cap { font-size:10px; text-align:center; opacity:.6; margin-top:4px; }
+
+  /* گوشه بالا-راست: امتیاز */
+  #scorebox { position:absolute; top:10px; left:50%; transform:translateX(-50%); display:flex; gap:8px; }
+  #scorebox .item { padding:6px 12px; font-size:12px; display:flex; gap:6px; align-items:center; }
+  #scorebox .item b { color:#ffd76a; font-size:14px; }
+
+  /* دکمه‌های گوشه */
+  #corner { position:absolute; top:64px; right:10px; display:flex; flex-direction:column; gap:8px; }
+  .cbtn {
+    pointer-events:auto; cursor:pointer; width:44px; height:44px; border-radius:12px;
+    border:1px solid rgba(120,170,230,.25); background:rgba(8,16,26,.82); color:#cfe2f7;
+    font-size:19px; display:grid; place-items:center; backdrop-filter:blur(6px);
+  }
+  .cbtn:hover { background:rgba(24,44,68,.92); }
+  .cbtn small { font-size:8px; display:block; margin-top:-3px; opacity:.65; }
+
+  /* مرکز نشانه */
+  #cross { position:absolute; left:50%; top:50%; width:26px; height:26px; transform:translate(-50%,-50%); pointer-events:none; opacity:.7; }
+  #cross::before, #cross::after { content:''; position:absolute; background:#d8ecff; }
+  #cross::before { left:50%; top:0; width:2px; height:100%; transform:translateX(-50%); }
+  #cross::after { top:50%; left:0; height:2px; width:100%; transform:translateY(-50%); }
+  #hitmark { position:absolute; inset:0; display:grid; place-items:center; opacity:0; transition:opacity .1s; font-size:26px; color:#ff5a3c; text-shadow:0 0 12px #ff3b30; }
+  #vignette { position:absolute; inset:0; opacity:0; transition:opacity .18s; background:radial-gradient(circle at 50% 55%, transparent 42%, rgba(200,20,10,.55) 100%); }
+
+  #toast {
+    position:absolute; top:96px; left:50%; transform:translateX(-50%); display:none;
+    background:rgba(6,14,24,.9); border:1px solid rgba(140,190,255,.25); border-radius:12px;
+    padding:9px 18px; font-size:13px; font-weight:700; box-shadow:0 8px 24px rgba(0,0,0,.5);
+  }
+  #prompt { position:absolute; bottom:170px; left:50%; transform:translateX(-50%); display:none; font-size:13px; background:rgba(6,14,24,.85); padding:7px 16px; border-radius:10px; border:1px solid rgba(140,190,255,.25); }
+
+  /* بنر پایان دور */
+  #banner { position:fixed; inset:0; display:grid; place-items:center; z-index:40; pointer-events:none; opacity:0; transition:opacity .4s; background:rgba(2,6,12,.55); }
+  #banner.show { opacity:1; }
+  #banner .box { text-align:center; padding:26px 44px; border-radius:20px; background:rgba(8,16,28,.92); border:1px solid rgba(140,190,255,.3); box-shadow:0 20px 60px rgba(0,0,0,.7); }
+  #banner h2 { font-size:26px; margin-bottom:6px; }
+  #banner p { font-size:14px; opacity:.75; }
+
+  /* جوی‌استیک و دکمه شلیک */
+  #joy { position:fixed; bottom:26px; left:24px; width:112px; height:112px; border-radius:50%;
+    background:rgba(140,190,255,.08); border:1.5px solid rgba(140,190,255,.3); display:none; z-index:20; touch-action:none; }
+  #joyknob { position:absolute; left:50%; top:50%; width:48px; height:48px; margin:-24px 0 0 -24px; border-radius:50%;
+    background:rgba(140,190,255,.35); border:1.5px solid rgba(200,225,255,.6); }
+  #firebtn { position:fixed; bottom:34px; right:24px; width:92px; height:92px; border-radius:50%;
+    background:rgba(255,90,60,.22); border:2px solid rgba(255,120,90,.6); display:none; z-index:20;
+    place-items:center; font-size:28px; color:#ffd9cf; touch-action:none; }
+  body.touch #joy, body.touch #firebtn { display:grid; }
+  body.touch #mapwrap { display:none; }
+
+  /* ---------------- پنل گالری ---------------- */
+  #gallery {
+    position:fixed; top:0; left:0; bottom:0; width:320px; z-index:60; background:rgba(4,10,18,.95);
+    border-inline-end:1px solid rgba(120,170,230,.2); transform:translateX(-105%); transition:transform .3s;
+    display:flex; flex-direction:column;
+  }
+  #gallery.open { transform:translateX(0); }
+  #ghead { padding:14px 16px; border-bottom:1px solid rgba(120,170,230,.18); display:flex; justify-content:space-between; align-items:center; }
+  #ghead h3 { font-size:14px; }
+  #ghead button { background:none; border:none; color:#9db8d4; font-size:20px; cursor:pointer; }
+  #gname { padding:10px 16px; font-size:12px; color:#ffd76a; font-weight:700; border-bottom:1px solid rgba(120,170,230,.12); }
+  #glist { flex:1; overflow-y:auto; padding:10px 10px 30px; }
+  .ggroup { font-size:11px; color:#7fa6cc; margin:12px 4px 6px; font-weight:700; }
+  .gitem {
+    display:block; width:100%; text-align:right; padding:8px 11px; margin-bottom:5px;
+    background:rgba(18,30,46,.7); border:1px solid rgba(120,170,230,.12); border-radius:9px;
+    color:#d3e2f2; font-family:inherit; font-size:12px; cursor:pointer; transition:.15s;
+  }
+  .gitem:hover { background:rgba(32,54,80,.85); }
+  .gitem.sel { border-color:#4aa8ff; background:rgba(30,80,150,.55); }
+  #ghint { padding:8px 16px 14px; font-size:10px; opacity:.5; line-height:1.7; }
+
+  /* ---------------- تخته امتیاز ---------------- */
+  #scoreboard { position:fixed; inset:0; z-index:55; display:none; place-items:center; background:rgba(2,6,12,.72); }
+  #scoreboard.open { display:grid; }
+  #scoreboard .card { width:min(560px,92vw); padding:20px; border-radius:18px; background:rgba(8,16,28,.97); border:1px solid rgba(140,190,255,.25); }
+  #scoreboard h3 { text-align:center; font-size:16px; margin-bottom:14px; }
+  #scoreboard .cols { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  #scoreboard .t { padding:12px; border-radius:12px; background:rgba(16,28,44,.8); }
+  #scoreboard .t h4 { font-size:13px; margin-bottom:8px; }
+  #scoreboard .t.blue h4 { color:#6dbcff; }
+  #scoreboard .t.red h4 { color:#ff8a6a; }
+  #scoreboard .t p { font-size:12px; display:flex; justify-content:space-between; margin:4px 0; opacity:.85; }
+  #scoreboard .close { display:block; margin:16px auto 0; padding:8px 22px; border-radius:10px; border:1px solid rgba(140,190,255,.3); background:rgba(20,36,56,.9); color:#dce9f8; font-family:inherit; cursor:pointer; }
+
+  /* ---------------- لودینگ ---------------- */
+  #loading { position:fixed; inset:0; z-index:80; display:grid; place-items:center; background:#03060a; text-align:center; }
+  #loading .t { font-size:22px; font-weight:900; margin-bottom:10px; letter-spacing:.5px; }
+  #loading .s { font-size:12px; opacity:.6; }
+  #loadmsg { margin-top:18px; font-size:13px; color:#7fb2e0; }
+  .spin { width:34px; height:34px; margin:0 auto 18px; border:3px solid rgba(120,170,230,.18); border-top-color:#4aa8ff; border-radius:50%; animation:sp .9s linear infinite; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+
+  @media (max-width:720px) {
+    #weapons { min-width:0; width:calc(100% - 28px); left:14px; right:14px; bottom:170px; }
+    #health { width:180px; bottom:auto; top:76px; right:10px; }
+    #scorebox { top:auto; bottom:118px; }
+    #mapwrap { display:none; }
+    #midinfo { display:none; }
+  }
+</style>
 </head>
 <body>
-  <div id="game"></div>
+<div id="game"></div>
 
-  <div id="loading"><div class="spin"></div><div>در حال بارگذاری مدل‌های سه‌بعدی…</div><div id="loadmsg" style="font-size:13px;opacity:.7"></div></div>
+<div id="hud">
+  <div id="vignette"></div>
+  <div id="cross"></div>
+  <div id="hitmark">✕</div>
 
-  <div id="hud">
-    <div id="topbar">
-      <div id="stats" class="panel">
-        <div class="stat"><span>❤️</span><div id="hpwrap"><div id="hpfill"></div></div></div>
-        <div class="stat"><span>🏆</span><span id="score">۰</span><small>امتیاز</small></div>
-        <div class="stat"><span>🌊</span><span id="wave">۱</span><small>موج</small></div>
-        <div class="stat"><span>👾</span><span id="kills">۰</span><small>دشمن</small></div>
-      </div>
-      <div style="display:flex;gap:10px;align-items:flex-start">
-        <div id="weaponbox" class="panel"><div id="weaponname">شمشیر</div><div id="weaponhint">کلیک = حمله</div></div>
-        <canvas id="minimap" width="150" height="150"></canvas>
-        <button class="btn" id="galleryBtn">🎨 گالری مدل‌ها</button>
-      </div>
+  <div id="top">
+    <div class="teambox panel blue">
+      <div class="head"><span class="dot"></span> تیم سوات</div>
+      <div class="bar"><i id="barS" style="width:100%"></i></div>
+      <div class="info"><span>نفرات: <b id="aliveS">4</b></span><span>کشته: <b id="killS">0</b></span></div>
     </div>
-    <div id="prompt" class="panel"></div>
-    <div id="toast" class="panel"></div>
-    <div id="help" class="panel">
-      <kbd>W A S D</kbd> حرکت &nbsp;•&nbsp; <kbd>ماوس</kbd> نشانه‌گیری &nbsp;•&nbsp; <kbd>کلیک</kbd> حمله<br/>
-      <kbd>E</kbd> برداشتن اسلحه &nbsp;•&nbsp; <kbd>غلتک ماوس</kbd> زوم &nbsp;•&nbsp; <kbd>Esc</kbd> بستن گالری
+    <div id="midinfo" class="panel">
+      <div class="r" id="roundtext">دور ۱</div>
+      <div class="power"><i></i>برق قطع — وضعیت اضطراری</div>
+    </div>
+    <div class="teambox panel red">
+      <div class="head"><span class="dot"></span> تیم تروریست</div>
+      <div class="bar"><i id="barT" style="width:100%"></i></div>
+      <div class="info"><span>نفرات: <b id="aliveT">5</b></span><span>کشته: <b id="killT">0</b></span></div>
     </div>
   </div>
 
-  <div id="gallery">
-    <div id="gpanel" class="panel">
-      <h2>🎨 گالری مدل‌های سه‌بعدی</h2>
-      <p>۵۶ مدل رایگان (CC0) از پک‌های <b>Quaternius</b> — دانلودشده از گیت‌هاب (منبع: github.com/trebeljahr/quaternius-showcase). روی هر مدل کلیک کن تا در صحنه بچرخد.</p>
-      <div id="glist"></div>
-    </div>
-    <button class="btn ghost" id="gclose">✕ بستن (Esc)</button>
-    <div id="ginfo" class="panel"><div id="gname">—</div><div id="ghint">بکشید تا بچرخد • غلتک = زوم</div></div>
+  <div id="scorebox">
+    <div class="item panel">امتیاز <b id="score">0</b></div>
   </div>
 
-  <div id="joy"><div id="joyknob"></div></div>
-  <button class="btn" id="atkbtn">⚔️ حمله</button>
+  <div id="corner">
+    <button class="cbtn" id="galleryBtn" title="گالری مدل‌ها">🎨</button>
+    <button class="cbtn" id="boardBtn" title="تخته امتیاز">📋</button>
+  </div>
 
-  <script type="module" src="/src/main.js"></script>
+  <div id="health" class="panel">
+    <div class="row"><span>جان</span><div class="track"><i id="hpfill" style="width:100%"></i></div><div class="num" id="hptext">100</div></div>
+    <div class="row"><span>زره</span><div class="track"><i id="armorfill" style="width:100%"></i></div><div class="num" id="armortext">100</div></div>
+  </div>
+
+  <div id="weapons" class="panel">
+    <div id="wepname">تفنگ مهاجم AR-1</div>
+    <div id="wepinfo">
+      <span id="magtext">30 / 30</span>
+      <span style="font-size:11px;opacity:.6">R = خشاب | E = چراغ‌قوه</span>
+    </div>
+    <div class="wep-actions">
+      <button class="abtn" id="grenbtn"><div class="cd" id="cdG"></div><b>💣 نارنجک Q</b><span class="n" id="ammoG">3</span></button>
+      <button class="abtn" id="smokebtn"><div class="cd" id="cdS"></div><b>💨 دودزا F</b><span class="n" id="ammoS">3</span></button>
+    </div>
+  </div>
+
+  <div id="mapwrap" class="panel">
+    <canvas id="minimap"></canvas>
+    <div class="cap">نقشه شرکت</div>
+  </div>
+
+  <div id="toast"></div>
+  <div id="prompt"></div>
+</div>
+
+<div id="joy"><div id="joyknob"></div></div>
+<div id="firebtn">🔥</div>
+
+<div id="gallery">
+  <div id="ghead"><h3>🎨 گالری مدل‌های بازی</h3><button id="gclose">✕</button></div>
+  <div id="gname">—</div>
+  <div id="glist"></div>
+  <div id="ghint">مدل روی سکو با کشیدن ماوس می‌چرخد. همه‌ی مدل‌ها GLB واقعی از پک‌های Quaternius هستند.</div>
+</div>
+
+<div id="scoreboard">
+  <div class="card">
+    <h3>📋 وضعیت تیم‌ها</h3>
+    <div class="cols">
+      <div class="t blue">
+        <h4>تیم سوات</h4>
+        <p><span>نفرات زنده</span><b id="sbAliveS">4</b></p>
+        <p><span>کشته‌ها</span><b id="sbKillS">0</b></p>
+        <p><span>توانایی ویژه</span><b>ورود انفجاری / چراغ‌قوه</b></p>
+      </div>
+      <div class="t red">
+        <h4>تیم تروریست</h4>
+        <p><span>نفرات زنده</span><b id="sbAliveT">5</b></p>
+        <p><span>کشته‌ها</span><b id="sbKillT">0</b></p>
+        <p><span>توانایی ویژه</span><b>دودزا / کمین در تاریکی</b></p>
+      </div>
+    </div>
+    <button class="close" id="boardClose">بستن</button>
+  </div>
+</div>
+
+<div id="banner"><div class="box"><h2></h2><p></p></div></div>
+
+<div id="loading">
+  <div>
+    <div class="spin"></div>
+    <div class="t">نبرد شرکت</div>
+    <div class="s">سوات vs تروریست — برق قطع است</div>
+    <div id="loadmsg">در حال بارگذاری…</div>
+  </div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+<script>
+  if ('ontouchstart' in window) document.body.classList.add('touch');
+</script>
 </body>
 </html>
