@@ -91,6 +91,7 @@ scene.background = new THREE.Color(0x010204);
 // همه‌چیز حتی کف زیر پای بازیکن با رنگ مه (تقریباً سیاه) جایگزین می‌شد.
 scene.fog = new THREE.FogExp2(0x04070e, 0.0045);
 
+const crossEl = document.getElementById('cross');
 const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 260);
 /* ⚠️ حیاتی برای نمای عمود: با نگاه مستقیم به پایین، بردار up پیش‌فرض
    (0,1,0) با جهت نگاه موازی می‌شود و ماتریس دوربین دچار ابهام می‌شود
@@ -2082,6 +2083,11 @@ function animate() {
   }
   camera.position.y = camZoom;
   camera.lookAt(camTarget);
+
+  /* نشانه‌گر را زیر پای بازیکن می‌گذاریم (جهت +Z = پایین صفحه چون
+     camera.up = (0,0,-1)). این‌طور کاراکتر هرگز زیر نشانه‌گر پنهان نمی‌شود
+     و در نمای عمود «جلو» همان جایی است که نور می‌تابد. */
+  crossEl.style.top = '58%';
   recoil = Math.max(0, recoil - dt * 3);
 
   updateEffects(dt);

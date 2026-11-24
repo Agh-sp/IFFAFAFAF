@@ -100,10 +100,13 @@
   .cbtn small { font-size:8px; display:block; margin-top:-3px; opacity:.65; }
 
   /* مرکز نشانه */
-  #cross { position:absolute; left:50%; top:50%; width:26px; height:26px; transform:translate(-50%,-50%); pointer-events:none; opacity:.7; }
+  /* ⚠️ در نمای عمود بازیکن مرکز کادر است. نشانه‌گر وسط می‌افتاد روی سرش و
+     کاراکتر را می‌پوشاند. حالا نشانه‌گر زیر پای بازیکن است (در جهت نگاه
+     حرکت می‌کند و با ماوس جابه‌جا می‌شود) و خودِ بازیکن آزاد است. */
+  #cross { position:absolute; left:50%; top:58%; width:18px; height:18px; transform:translate(-50%,-50%); pointer-events:none; opacity:.55; transition:top .08s ease-out; }
   #cross::before, #cross::after { content:''; position:absolute; background:#d8ecff; }
-  #cross::before { left:50%; top:0; width:2px; height:100%; transform:translateX(-50%); }
-  #cross::after { top:50%; left:0; height:2px; width:100%; transform:translateY(-50%); }
+  #cross::before { left:50%; top:4px; width:1px; height:10px; transform:translateX(-50%); }
+  #cross::after { top:50%; left:4px; height:1px; width:10px; transform:translateY(-50%); }
   #hitmark { position:absolute; inset:0; display:grid; place-items:center; opacity:0; transition:opacity .1s; font-size:26px; color:#ff5a3c; text-shadow:0 0 12px #ff3b30; }
   #vignette { position:absolute; inset:0; opacity:0; transition:opacity .18s; background:radial-gradient(circle at 50% 55%, transparent 42%, rgba(200,20,10,.55) 100%); }
 
@@ -319,6 +322,12 @@
   </div>
 </div>
 
+<script>
+  /* برای تست: با ?play یا #play بدون هیچ کلیکی وارد بازی می‌شویم. */
+  if (/[?&#]play\b/.test(location.href)) {
+    document.documentElement.classList.add('autoplay');
+  }
+</script>
 <script type="module" src="/src/main.js"></script>
 <script>
   if ('ontouchstart' in window) document.body.classList.add('touch');

@@ -1,3 +1,4 @@
 node_modules/
 dist/
 scene-preview.png
+src/_main.boot.mjs
