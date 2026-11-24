@@ -6,6 +6,7 @@ globalThis.self = globalThis;
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { addReadableKit } from '../src/kit.js';
 import fs from 'node:fs';
 import { deflateSync } from 'node:zlib';
 
@@ -16,7 +17,7 @@ const load = f => new Promise((r, j) => {
 });
 
 // ---------- ساخت صحنه مثل بازی ----------
-const HW = 40, HH = 30, camZoom = 7.9;
+const HW = 40, HH = 30, camZoom = 11;
 const W = 720, H = 460;
 
 const g = await load(process.env.MODEL || 'public/models/chars/swat.glb');
@@ -74,6 +75,7 @@ if (gunReady) {
   gunScene.traverse(o => { if (o.isMesh) { o.frustumCulled = false; gunMeshes.push(o); } });
 }
 
+
 const playerPos = new THREE.Vector3(0, 0.09, 0);
 const playerG = new THREE.Group();
 playerG.position.copy(playerPos);
@@ -81,6 +83,10 @@ playerG.rotation.y = Math.PI;      // رو به دوربین
 playerG.add(root);
 if (gunReady) gunHolder.position.copy(root.worldToLocal(gunHolder.position.clone())), playerG.add(gunHolder);
 playerG.updateMatrixWorld(true);
+// ---- تجهیزات خوانا: از همان ماژول بازی
+addReadableKit(root, 'swat');
+playerG.updateMatrixWorld(true);
+
 if (gunMeshes.length) {
   const bb = new THREE.Box3().setFromObject(gunHolder);
   console.log('gun world bbox', bb.min.toArray().map(v=>v.toFixed(2)).join(','), '→', bb.max.toArray().map(v=>v.toFixed(2)).join(','),
@@ -89,20 +95,23 @@ if (gunMeshes.length) {
 
 // ---------- دوربین دقیقاً مثل بازی ----------
 const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 400);
-camera.position.set(playerPos.x, camZoom, playerPos.z + camZoom * 0.78);
-camera.lookAt(playerPos.x, 1.05, playerPos.z - 4.2);
+camera.up.set(0, 0, -1);   // مثل بازی
+camera.position.set(playerPos.x, camZoom, playerPos.z);
+camera.lookAt(playerPos.x, 0.9, playerPos.z);
 camera.updateMatrixWorld(true);
 
 // ---------- رندر: برای هر پیکسل، پرتو بزن ----------
 const ray = new THREE.Raycaster();
 const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
-// جمع‌آوری مش‌ها
+
+// جمع‌آوری مش‌ها (بعد از افزودن کلاه/پد شانه، وگرنه جا می‌مانند)
 const meshes = [];
-root.traverse(o => { if (o.isMesh) meshes.push(o); });
+playerG.traverse(o => { if (o.isMesh && !gunMeshes.includes(o)) meshes.push(o); });
+
 // پوست‌دهی لازم است چون raycaster روی SkinnedMesh با boneTransform کار نمی‌کند
 // پس هندسه را با اعمال استخوان‌ها به‌روز می‌کنیم
-for (const m of meshes) {
+for (const m of [...meshes]) {
   if (!m.isSkinnedMesh) continue;
   const pos = m.geometry.attributes.position;
   const baked = new Float32Array(pos.count * 3);
@@ -127,6 +136,9 @@ for (const m of meshes) {
   const nm2 = (m.material?.name || '').toLowerCase();
   const teamColor = nm2 === 'skin' ? [201, 141, 99]
     : nm2 === 'visor' ? [27, 39, 51] : [74, 95, 120];
+  // دو تُن لباس، مطابق tintCharacter: Swat روشن‌تر، Swat_Black تیره
+  if (nm2 === 'swat') teamColor.splice(0, 3, 74, 95, 120);
+  if (nm2 === 'swat_black') teamColor.splice(0, 3, 38, 46, 58);
   const flat = palBytes && mc ? [Math.round(mc.r * 255), Math.round(mc.g * 255), Math.round(mc.b * 255)] : teamColor;
   for (let i = 0; i < pos.count; i++) {
     const c = (palBytes && uv) ? samplePal(uv.getX(i), uv.getY(i)) : flat;
@@ -138,6 +150,7 @@ for (const m of meshes) {
   const nm = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true }));
   nm.updateMatrixWorld();
   nm.userData.faceCols = true;
+  nm.name = (Array.isArray(m.material) ? m.material[0]?.name : m.material?.name) || '?';
   meshes.push(nm);
   meshes.splice(meshes.indexOf(m), 1);
 }
@@ -196,6 +209,19 @@ for (let y = 0; y < H; y++) {
     // کاراکتر
     const hits = charHits;
     if (hits.length && hits[0].distance < 200) {
+      // مش‌هایی که رنگ رأس ندارند (کلاه/پد شانه): رنگ متریالشان را بگیر
+      if (!hits[0].object.geometry.attributes.color) {
+        const mc = hits[0].object.material?.color || { r: 0.5, g: 0.5, b: 0.5 };
+        const n = hits[0].face?.normal || new THREE.Vector3(0, 1, 0);
+        const l = Math.max(0.7, 0.7 + 0.3 * Math.abs(n.y));
+        const c2 = [mc.r * 255 * l, mc.g * 255 * l, mc.b * 255 * l].map(v => Math.min(255, Math.round(v)));
+        px(x, y, c2);
+        charPixels++;
+        charMinX = Math.min(charMinX, x); charMaxX = Math.max(charMaxX, x);
+        charMinY = Math.min(charMinY, y); charMaxY = Math.max(charMaxY, y);
+        continue;
+      }
+      if (process.env.DEBUGCOL) { const k = hits[0].object.name || '?'; globalThis.__c = globalThis.__c || {}; globalThis.__c[k] = (globalThis.__c[k]||0)+1; }
       col = [226, 152, 88];
       const h = hits[0];
       if (h.face && h.object.geometry.attributes.color) {
@@ -242,6 +268,7 @@ fs.writeFileSync('scene-preview.png', Buffer.concat([
 ]));
 
 console.log('scene-preview.png نوشته شد، اسلحه:', gunReady ? 'در دست' : '❌ نیست');
+if (globalThis.__c) console.log('hits by object:', JSON.stringify(globalThis.__c));
 console.log('پیکسل‌های اسلحه:', gunPx);
 console.log('پیکسل‌های کاراکتر:', charPixels, `(${(charPixels/(W*H)*100).toFixed(2)}٪ صفحه)`);
 if (charPixels > 0) {

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { addReadableKit } from './kit.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import {
   TILE, COLS, ROWS, HW, HH, GRID, FLOOR, WALL, WORLD_W, WORLD_D,
@@ -91,6 +92,11 @@ scene.background = new THREE.Color(0x010204);
 scene.fog = new THREE.FogExp2(0x04070e, 0.0045);
 
 const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 260);
+/* ⚠️ حیاتی برای نمای عمود: با نگاه مستقیم به پایین، بردار up پیش‌فرض
+   (0,1,0) با جهت نگاه موازی می‌شود و ماتریس دوربین دچار ابهام می‌شود
+   (تصویر می‌چرخد یا NaN می‌شود). با up = (0,0,-1) «بالای صفحه» می‌شود
+   سمت −Z یعنی شمال نقشه. */
+camera.up.set(0, 0, -1);
 camera.position.set(0, 26, 16);
 
 // برق قطع است: نور محیط بسیار کم
@@ -98,10 +104,14 @@ camera.position.set(0, 26, 16);
 // چراغ‌های اضطراری باقی‌مانده چیزی را روشن می‌کنند.
 // نور محیطی «خیلی کم ولی کافی»: بدون این، کل صفحه سیاه مطلق می‌شود
 // و بازیکن حتی زمین زیر پایش را نمی‌بیند. تاریکی از کم بودنش می‌آید، نه از صفر بودنش.
-const ambientLight = new THREE.AmbientLight(0x8fa6c0, 2.1);
+/* GDD بخش ۴.۳ «تاریکی خوانا»: نور محیط تقریباً هیچ، ولی صفر نه.
+   قانون نور ۱: حتی در تاریکی مطلق، کفِ زیر پای بازیکن باید حداقل
+   ۳٪ روشنایی داشته باشد (تله‌ی «سیاه مطلق» ممنوع).
+   قبلاً این عدد ۲.۱ بود که نقشه را «کم‌نور» می‌کرد، نه «تاریک». */
+const ambientLight = new THREE.AmbientLight(0x8fa6c0, 0.34);
 scene.add(ambientLight);
-// نور عمودی کم‌سو از بالا: بدون این، دیوارها و کف کاملاً تخت و سیاه می‌شوند
-const overhead = new THREE.DirectionalLight(0xc8dcf6, 1.5);
+// نور عمودی خیلی کم از بالا: بدون این، سطوح افقی کاملاً تخت و سیاه می‌شوند
+const overhead = new THREE.DirectionalLight(0xc8dcf6, 0.42);
 overhead.position.set(8, 40, 12);
 scene.add(overhead);
 
@@ -660,6 +670,62 @@ const selfGlow = new THREE.PointLight(0xb8d2f5, 7, 8.5, 1.4);
 selfGlow.position.set(0, 1.1, 0);
 playerG.add(selfGlow);
 
+/* ---------------- کشش نور چراغ‌قوه روی کف (GDD بخش ۴.۴) ----------------
+   در دوربین عمود ۹۰°، مخروط سه‌بعدی SpotLight تقریباً دیده نمی‌شود؛
+   بازیکن فقط می‌بیند که «یک تکه زمین روشن است» ولی جهتش را نمی‌فهمد.
+   این یک کوآد روی کف است که با یک شیدر کوچک، یک بیضی نور نرم می‌کشد:
+   از پای کاراکتر تا ~۱۰ متر جلو، با falloff نرم و لبه‌ی محو.
+   هزینه: یک draw call، بدون نور اضافه، بدون بافت. */
+function makeFlashCones() {
+  const geo = new THREE.PlaneGeometry(1, 1, 1, 12);
+  // UV را طوری جابه‌جا می‌کنیم که v=0 پای کاراکتر و v=1 انتهای مخروط باشد
+  const mat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    uniforms: {
+      uColor:   { value: new THREE.Color(0xfff0c8) },
+      uIntensity: { value: 0 },
+    },
+    vertexShader: /* glsl */`
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */`
+      uniform vec3  uColor;
+      uniform float uIntensity;
+      varying vec2 vUv;
+      void main() {
+        float v = vUv.y;                 // ۰ = پای کاراکتر ، ۱ = انتهای نور
+        float u = abs(vUv.x - 0.5) * 2.0; // ۰ = مرکز ، ۱ = لبه
+        // عرض مخروط به‌تدریج زیاد می‌شود
+        float halfW = mix(0.16, 1.0, pow(v, 0.75));
+        float edge  = 1.0 - smoothstep(halfW * 0.35, halfW, u);
+        // شدت: نزدیک پای کاراکتر روشن‌تر، انتها محو
+        float along = smoothstep(0.0, 0.16, v) * (1.0 - smoothstep(0.55, 1.0, v));
+        float a = edge * along * uIntensity;
+        if (a < 0.002) discard;
+        gl_FragColor = vec4(uColor, a);
+      }`,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = Math.PI / 2;    // خوابیده روی کف، v=۱ به سمت +Z
+  mesh.position.y = 0.02;           // کمی بالای کف تا z-fight نشود
+  mesh.renderOrder = 2;
+  mesh.frustumCulled = false;
+  return mesh;
+}
+const playerLightPool = makeFlashCones();
+playerG.add(playerLightPool);
+// مخروط به سمت +Z کشیده می‌شود (جلوی کاراکتر)؛ طول و عرض نهایی:
+const FLASH_LEN = 11, FLASH_WID = 7.2;
+playerLightPool.scale.set(FLASH_WID, FLASH_LEN, 1);
+playerLightPool.position.z = FLASH_LEN * 0.5;   // از پای کاراکتر شروع شود
+
+
 function setFlashlight(on) {
   lightState.on = on;
   playClick(on ? 0.7 : 0.5);
@@ -708,11 +774,14 @@ function tintCharacter(model, team) {
        «لکه‌ی رنگی» نمی‌شود. */
     const n = (m.name || '').toLowerCase();
     if (n === 'skin') {
-      m.color.setHex(0xc98d63);
+      m.color.setHex(0xa9785c);
     } else if (n === 'visor') {
       m.color.setHex(team === 'swat' ? 0x1b2733 : 0x241a14);
       m.emissive = base.clone().multiplyScalar(0.35);
       m.emissiveIntensity = 1.0;   // شیشه‌ی ماسک کمی می‌درخشد
+    } else if (n === 'swat_black') {
+      // تن تیره‌ی لباس: کمی تیره‌تر از تن اصلی تا جزئیات از بالا خوانا بماند
+      m.color.copy(accent).multiplyScalar(0.62);
     } else {
       m.color.copy(accent);
       m.emissive = base.clone().multiplyScalar(0.05);
@@ -849,6 +918,7 @@ async function buildPlayer() {
   tintCharacter(playerModel, 'swat');
   playerModel.position.y = 0;
   playerModel.rotation.y = playerModel.userData.yaw || 0;
+  addReadableKit(playerModel, 'swat');
   playerG.add(playerModel);
   await equipWeapon(PLAYER_LOADOUT[0]);
   return playerModel;
@@ -939,7 +1009,8 @@ async function spawnActor(def, team, pos) {
   const model = await loadCharacter(def.model, 1.8);
   tintCharacter(model, team);
   model.position.y = 0;
-  model.rotation.y = model.userData.yaw || 0;  // مدل رو به -Z است، گروه رو به +Z
+  model.rotation.y = model.userData.yaw || 0;  // مدل رو به +Z است
+  addReadableKit(model, team);
   g.add(model);
   await attachGun(model, def.gun);
 
@@ -1347,7 +1418,11 @@ renderer.domElement.addEventListener('pointerdown', () => renderer.domElement.fo
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; });
 let mouseX = innerWidth / 2, mouseY = innerHeight / 2, mouseDown = false;
 let joyVec = { x: 0, y: 0 }, joyFire = false, joyMoving = false;
-let camZoom = 7.9;  // ارتفاع دوربین — با فاصله‌ی پشت، زاویه ~۵۲° می‌دهد
+/* ارتفاع دوربین در نمای عمود.
+   میدان دید عمودی = ۲ × ارتفاع × tan(FOV/2) = ۲×۱۱×tan(22.5°) ≈ ۹.۱ متر
+   یعنی حدود ۹ متر طول و ۱۶ متر عرض روی صفحه — برای راهروی ۳ متری و
+   اتاق ۱۴ متری مناسب است. از این بالاتر، کاراکتر به یک نقطه تبدیل می‌شود. */
+let camZoom = 11;
 let camShakeX = 0;
 const camTarget0 = new THREE.Vector3();
 
@@ -1395,7 +1470,7 @@ addEventListener('wheel', e => {
     const n = (i + (e.deltaY > 0 ? 1 : -1) + PLAYER_LOADOUT.length) % PLAYER_LOADOUT.length;
     equipWeapon(PLAYER_LOADOUT[n]);
   } else {
-    camZoom = clamp(camZoom + e.deltaY * 0.011, 5.5, 15);   // زوم محدود: دوربین از نقشه بیرون نزند
+    camZoom = clamp(camZoom + e.deltaY * 0.012, 7.5, 18);   // زوم محدود: دوربین از نقشه بیرون نزند
   }
 }, { passive: true });
 addEventListener('resize', () => {
@@ -1978,42 +2053,34 @@ function animate() {
   }
 
   /* ------------------------- دوربین -------------------------
-     دوربین دنبال‌کننده‌ی نرم با زاویه‌ی ثابت از بالا.
-     - هیچ چرخشی با aimAngle ندارد (وگرنه نما افقی می‌شود و همه‌چیز
-       از دید خارج می‌شود)
-     - ارتفاع و فاصله‌ی پشت با هم تنظیم شده‌اند تا زاویه ~۷۰ درجه بماند
-     - مکان دوربین فقط داخل مرزهای جهان محدود می‌شود
+     مطابق GDD بخش ۱ و ۲: دوربین «تاپ‌داون واقعی» — عمودِ کامل (۹۰°).
+     کاراکتر در مرکز کادر می‌ماند (در نمای عمود، «جلو/عقب» معنا ندارد،
+     پس LOOK_AHEAD هم حذف شد) و حرکت نرم با lerp دنبال می‌شود.
+     ارتفاع = camZoom ، افست Z = صفر (عمودِ مطلق).
   */
-  /* ⚠️ باگ «نامرئی بودن»: دوربین دقیقاً روی بازیکن نگاه می‌کرد، پس کاراکتر
-     همیشه زیر نشانه‌گر وسط صفحه می‌افتاد و با آن قاطی می‌شد.
-     حالا هدف دوربین کمی «جلوتر» (سمت -Z) است تا بازیکن در یک‌سوم
-     پایین کادر بایستد و فضای پیش‌رو دیده شود. */
-  const LOOK_AHEAD = 4.2;
-  const camTarget = new THREE.Vector3(playerG.position.x, 1.05, playerG.position.z - LOOK_AHEAD);
+  const camTarget = new THREE.Vector3(playerG.position.x, 0.9, playerG.position.z);
   camTarget0.copy(camTarget);
 
-  const camH = camZoom;                       // ارتفاع
-  const camBack = camZoom * 0.78;             // فاصله‌ی افقی پشتِ بازیکن (زاویه ~۵۲°)
   const desired = new THREE.Vector3(
     playerG.position.x,
-    camH,
-    playerG.position.z + camBack,
+    camZoom,
+    playerG.position.z,
   );
 
   // حرکت نرم ولی سریع (بدون تأخیر محسوس)
   const lerpK = 1 - Math.exp(-dt * 14);
   camera.position.lerp(desired, lerpK);
 
-  // دوربین هرگز بیرون زمین نرود و از سطح بالاتر بماند
+  // دوربین هرگز از زمین بیرون نرود
   camera.position.x = clamp(camera.position.x, -HW + 2, HW - 2);
   camera.position.z = clamp(camera.position.z, -HH + 2, HH - 2);
-  camera.position.y = Math.max(5, camera.position.y);
 
   if (shake > 0) {
     camera.position.x += rand(-shake, shake);
-    camera.position.y += rand(-shake, shake) * 0.5;
+    camera.position.z += rand(-shake, shake);
     shake = Math.max(0, shake - dt * 2.4);
   }
+  camera.position.y = camZoom;
   camera.lookAt(camTarget);
   recoil = Math.max(0, recoil - dt * 3);
 
@@ -2025,6 +2092,10 @@ function animate() {
   // نور بازیکن: اگر روشن است انرژی دارد، اگر خاموش است صفر
   const targetI = lightState.on ? 90 : 0;
   wLight.spot.intensity += (targetI - wLight.spot.intensity) * Math.min(1, dt * 14);
+  /* شدت کشش نور روی کف — با همان چراغ‌قوه خاموش/روشن می‌شود */
+  const coneU = playerLightPool.material.uniforms.uIntensity;
+  const coneTarget = lightState.on ? 0.55 : 0;
+  coneU.value += (coneTarget - coneU.value) * Math.min(1, dt * 10);
   // لرزش خیلی کم نور همراه با حرکت (دست لرزان)
   weaponLightGroup.position.x = (WEAPONS[player.weapon].kind === 'pistol' || WEAPONS[player.weapon].kind === 'melee' ? 0.22 : 0.32)
     + Math.sin(t * 6) * (joyMoving ? 0.035 : 0.014);
