@@ -107,6 +107,12 @@
   #cross::before, #cross::after { content:''; position:absolute; background:#d8ecff; }
   #cross::before { left:50%; top:4px; width:1px; height:10px; transform:translateX(-50%); }
   #cross::after { top:50%; left:4px; height:1px; width:10px; transform:translateY(-50%); }
+  #fps {
+    position:absolute; top:10px; right:12px; font-family:ui-monospace,monospace;
+    font-size:11px; font-weight:700; letter-spacing:.5px; color:#3ddc63;
+    background:rgba(3,7,12,.55); padding:3px 8px; border-radius:6px;
+    pointer-events:none; opacity:.75;
+  }
   #hitmark { position:absolute; inset:0; display:grid; place-items:center; opacity:0; transition:opacity .1s; font-size:26px; color:#ff5a3c; text-shadow:0 0 12px #ff3b30; }
   #vignette { position:absolute; inset:0; opacity:0; transition:opacity .18s; background:radial-gradient(circle at 50% 55%, transparent 42%, rgba(200,20,10,.55) 100%); }
 
@@ -261,6 +267,7 @@
 <div id="hud">
   <div id="vignette"></div>
   <div id="cross"></div>
+  <div id="fps">— FPS</div>
   <div id="hitmark">✕</div>
 
   <div id="corner">

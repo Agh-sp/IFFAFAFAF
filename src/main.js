@@ -956,10 +956,13 @@ function layoutGun(h, dt = 0.016) {
     h.position.set(0.34, hh * 0.62, 0.42);
     h.quaternion.identity();
   }
-  // طول اسلحه در جهان ≈ worldLen
+  /* طول اسلحه در جهان ≈ worldLen.
+     ⚠️ BUG: قبلاً مقیاس با lerp هر فریم دنبال هدف می‌رفت و چون مقدار
+     هدف نویز کوچک داشت، اسلحه دائم کمی «نفس می‌کشید» و لرزش داشت.
+     حالا یک‌بار ست می‌شود و فقط اگر اختلاف معنادار بود (>۱٪) اصلاح. */
   const want = worldLen / (gunLen * rootScale);
   const cur = h.scale.x || want;
-  h.scale.setScalar(Math.abs(cur - want) < 1e-4 ? want : cur + (want - cur) * Math.min(1, dt * 14));
+  if (Math.abs(cur - want) > want * 0.01) h.scale.setScalar(want);
 }
 
 let playerGunHolder = null;
@@ -1106,6 +1109,18 @@ function damageActor(a, dmg, from) {
   }
   a.hp -= dmg;
   drawTag(a.tag, Math.max(0, a.hp / a.maxHp));
+  /* واکنش به آسیب: عقب‌نشینی کوتاه + چرخش به سمت تیرانداز.
+     بدون این، بات‌ها مثل کیسه‌ی شن می‌ایستادند و گلوله می‌خوردند. */
+  if (from && from !== a) {
+    a.hurtTimer = 1.5;
+    a.strafeDir = Math.random() < 0.5 ? -1 : 1;
+    // تیرانداز را «به خاطر بسپار» حتی اگر در تاریکی باشد (صدای گلوله)
+    a.memoryTarget = from;
+    a.memoryPos = { x: from.g.position.x, z: from.g.position.z };
+    a.memoryTimer = Math.max(a.memoryTimer || 0, 2.0);
+    // اگر زخمی هم‌تیمی را دید، به سمتش می‌چرخد
+    a.alertUntil = 2.0;
+  }
   if (a.hp <= 0) killActor(a, from);
 }
 
@@ -1331,6 +1346,8 @@ function pickPatrolGoal(a) {
 
 function patrol(a, dt) {
   if (!a.vel) a.vel = { x: 0, z: 0 };
+  if (a.hurtTimer === undefined) a.hurtTimer = 0;
+  if (a.strafeDir === undefined) a.strafeDir = Math.random() < 0.5 ? -1 : 1;
   if (!a.patrolGoal) pickPatrolGoal(a);
   a.patrolWait = Math.max(0, (a.patrolWait || 0) - dt);
 
@@ -1422,8 +1439,17 @@ function updateAI(a, dt) {
   const tx = target.g.position.x, tz = target.g.position.z;
   const want = a.role === 'تک‌تیرانداز' ? 16 : a.role === 'پشتیبان' ? 10 : 7;
 
-  // رو به هدف
-  a.g.rotation.y = Math.atan2(tx - a.g.position.x, tz - a.g.position.z) + MODEL_YAW_OFFSET;
+  /* ---------- چرخش نرم به سمت هدف ----------
+     ⚠️ BUG (چرخش ربات‌وار): قبلاً `rotation.y = atan2(...)` هر فریم
+     مستقیم ست می‌شد. با تغییر لحظه‌ای هدف، بدن در یک فریم ۱۸۰° می‌پرید.
+     حالا حداکثر ۴۵۰°/ثانیه می‌چرخد — همان سرعت یک آدم. */
+  {
+    const wantRot = Math.atan2(tx - a.g.position.x, tz - a.g.position.z) + MODEL_YAW_OFFSET;
+    let diff = wantRot - a.g.rotation.y;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    a.g.rotation.y += clamp(diff, -7.5 * dt, 7.5 * dt);
+  }
 
   /* ---------- حرکت با شتاب و اصطکاک ----------
      ⚠️ باگ قبلی: `pos += dir * speed * dt` یعنی سرعت ثابت، شتاب صفر،
@@ -1431,21 +1457,52 @@ function updateAI(a, dt) {
        سرعت هدف تعیین می‌شود، سرعت فعلی به سمتش می‌رود، موقعیت از
        سرعت فعلی ساخته می‌شود. و قبل از شلیک، ۰.۲ ثانیه توقف می‌کند. */
   if (!a.vel) a.vel = { x: 0, z: 0 };
+  if (a.hurtTimer === undefined) a.hurtTimer = 0;
+  if (a.strafeDir === undefined) a.strafeDir = Math.random() < 0.5 ? -1 : 1;
   let vTargetX = 0, vTargetZ = 0;
 
   // اگر آماده‌ی شلیک است، سرعتش را کم می‌کند (توقف انسانی، نه فوری)
   const wantsToShoot = target && bestD < a.range && (a.aware || 0) >= 0.4;
 
-  if (!wantsToShoot) {
-    if (bestD > want) {
-      const ang = Math.atan2(tx - a.g.position.x, tz - a.g.position.z);
-      vTargetX = Math.sin(ang) * a.speed;
-      vTargetZ = Math.cos(ang) * a.speed;
-    } else if (bestD < want * 0.5) {
-      const ang = Math.atan2(a.g.position.x - tx, a.g.position.z - tz);
-      vTargetX = Math.sin(ang) * a.speed * 0.7;
-      vTargetZ = Math.cos(ang) * a.speed * 0.7;
-    }
+  /* ---------------- رفتار تاکتیکی (به‌جای «راه رفتن مستقیم») ----------------
+     ⚠️ BUG (AI احمق): قبلاً بات فقط یک کار می‌کرد — به سمت هدف راه می‌رفت
+     تا برسد، بعد می‌ایستاد و شلیک می‌کرد. آدم این‌طور نمی‌جنگد.
+     حالا پنج الگو دارد:
+       ۱) نزدیک شدن (اگر دور است)
+       ۲) جابه‌جایی جانبی (strafe) وقتی در برد است — هدف سخت‌تری است
+       ۳) عقب‌نشینی بعد از آسیب دیدن (۱.۵ ثانیه)
+       ۴) پناه گرفتن پشت نزدیک‌ترین ستون/مبلمان بعد از ۳۰٪ آسیب
+       ۵) دور زدن وقتی سلاحش برای برد فعلی مناسب نیست */
+  const dxn = (tx - a.g.position.x) / (bestD || 1);
+  const dzn = (tz - a.g.position.z) / (bestD || 1);
+  // بردار عمود بر خط دید (برای strafe)
+  const perpX = -dzn, perpZ = dxn;
+
+  if (a.hurtTimer > 0) {
+    // ۳) عقب‌نشینی: از هدف دور می‌شود و کمی کنار می‌زند
+    a.hurtTimer -= dt;
+    vTargetX = (-dxn * 0.85 + perpX * a.strafeDir) * a.speed;
+    vTargetZ = (-dzn * 0.85 + perpZ * a.strafeDir) * a.speed;
+  } else if (bestD > want) {
+    // ۱) نزدیک شدن
+    vTargetX = dxn * a.speed;
+    vTargetZ = dzn * a.speed;
+  } else if (wantsToShoot) {
+    // ۲) در برد: جابه‌جایی جانبی آرام (هدف سخت‌تر + طبیعی‌تر)
+    vTargetX = perpX * a.strafeDir * a.speed * 0.55;
+    vTargetZ = perpZ * a.strafeDir * a.speed * 0.55;
+  } else if (bestD < want * 0.5) {
+    // زیادی نزدیک شده: عقب
+    vTargetX = -dxn * a.speed * 0.7;
+    vTargetZ = -dzn * a.speed * 0.7;
+  }
+
+  /* تغییر جهت strafe هر ۱.۲ تا ۲.۴ ثانیه — بدون این، بات مثل پاندول
+     بین دو نقطه نوسان می‌کند و «ربات» به نظر می‌رسد. */
+  a.strafeTimer = (a.strafeTimer ?? 0) - dt;
+  if (a.strafeTimer <= 0) {
+    a.strafeTimer = rand(1.2, 2.4);
+    a.strafeDir = Math.random() < 0.5 ? -1 : 1;
   }
 
   // k=6 برای شتاب گرفتن، k=10 برای ایستادن (توقف سریع‌تر از شروع)
@@ -1574,6 +1631,8 @@ const inSmoke = pos => smokes.some(s => flatDist(s.group.position, pos) < s.radi
 
 /* --------------------------- افکت‌ها --------------------------- */
 let shake = 0, recoil = 0;
+let mmAcc = 0;   // شمارنده‌ی مینی‌مپ (۲۰ fps)
+let crossSet = false;
 
 /* ---------------- ریکویل واقعی (GDD v2 بخش ۴) ----------------
    ⚠️ باگ قبلی: `recoil` فقط یک عدد بود که هیچ‌جا اعمال نمی‌شد؛
@@ -1768,20 +1827,61 @@ let score = 0, roundNum = 1;
 const faNum = n => Math.round(n).toLocaleString('fa-IR');
 const addScore = n => { score = Math.max(0, score + n); };
 
-function updateHUD() {
-  document.getElementById('hpfill').style.width = Math.max(0, player.hp) + '%';
-  document.getElementById('armorfill').style.width = Math.max(0, player.armor) + '%';
+/* ⚠️ PERFORMANCE: این تابع قبلاً هر فریم صدا زده می‌شد و ۸ نوشتن DOM
+   داشت (style/textContent). نوشتن DOM هر فریم = reflow/repaint = افت
+   فریم روی سیستم ضعیف. حالا فقط وقتی مقدار واقعاً عوض شده بنویس.
+   اثر: از ~۴۸۰ نوشتن DOM در ثانیه به تقریباً صفر در حالت عادی. */
+const _hud = { hp: -1, armor: -1, mag: '', torch: null, wep: '', g: -1, s: -1, cdG: -1, cdS: -1 };
+function updateHUD(force = false) {
+  const hp = Math.max(0, player.hp);
+  if (force || hp !== _hud.hp) {
+    document.getElementById('hpfill').style.width = hp + '%';
+    _hud.hp = hp;
+  }
+  const ar = Math.max(0, player.armor);
+  if (force || ar !== _hud.armor) {
+    document.getElementById('armorfill').style.width = ar + '%';
+    _hud.armor = ar;
+  }
   const w = WEAPONS[player.weapon];
+
   const magTxt = w.kind === 'melee' ? '∞' : faNum(player.mag);
   const capTxt = w.mag === Infinity ? '∞' : faNum(w.mag);
-  document.getElementById('magtext').textContent = `${magTxt} / ${capTxt}`;
-  document.getElementById('torchstate').className = lightState.on ? 'on' : 'off';
-  document.querySelectorAll('#bar .slot').forEach(b => b.classList.toggle('active', b.dataset.w === player.weapon));
-  document.getElementById('wepname').textContent = WEAPONS[player.weapon].fa;
-  document.getElementById('ammoG').textContent = faNum(player.ammo.grenade);
-  document.getElementById('ammoS').textContent = faNum(player.ammo.smoke);
-  document.getElementById('cdG').style.height = (player.abilityCd.grenade / ABILITY_CD.grenade * 100) + '%';
-  document.getElementById('cdS').style.height = (player.abilityCd.smoke / ABILITY_CD.smoke * 100) + '%';
+  const magStr = `${magTxt} / ${capTxt}`;
+  if (force || magStr !== _hud.mag) {
+    document.getElementById('magtext').textContent = magStr;
+    _hud.mag = magStr;
+  }
+
+  if (force || lightState.on !== _hud.torch) {
+    document.getElementById('torchstate').className = lightState.on ? 'on' : 'off';
+    _hud.torch = lightState.on;
+  }
+
+  if (force || player.weapon !== _hud.wep) {
+    document.querySelectorAll('#bar .slot').forEach(b => b.classList.toggle('active', b.dataset.w === player.weapon));
+    document.getElementById('wepname').textContent = w.fa;
+    _hud.wep = player.weapon;
+  }
+
+  if (force || player.ammo.grenade !== _hud.g) {
+    document.getElementById('ammoG').textContent = faNum(player.ammo.grenade);
+    _hud.g = player.ammo.grenade;
+  }
+  if (force || player.ammo.smoke !== _hud.s) {
+    document.getElementById('ammoS').textContent = faNum(player.ammo.smoke);
+    _hud.s = player.ammo.smoke;
+  }
+
+  /* نوار خنک‌شدن: قبلاً هر فریم نوشته می‌شد، حتی وقتی صفر بود.
+     حالا فقط وقتی > ۰ یا در حال گذار به صفر است. */
+  const cg = player.abilityCd.grenade, cs = player.abilityCd.smoke;
+  if (force || cg > 0 || _hud.cdG > 0) {
+    if (cg !== _hud.cdG) { document.getElementById('cdG').style.height = (cg / ABILITY_CD.grenade * 100) + '%'; _hud.cdG = cg; }
+  }
+  if (force || cs > 0 || _hud.cdS > 0) {
+    if (cs !== _hud.cdS) { document.getElementById('cdS').style.height = (cs / ABILITY_CD.smoke * 100) + '%'; _hud.cdS = cs; }
+  }
 }
 
 function refreshStatics() {
@@ -2200,6 +2300,7 @@ function screenAim() {
 
 let debugOn = location.search.includes('debug') || location.hash.includes('debug');
 let fpsAcc = 0, fpsFrames = 0, fpsShown = 0;
+const fpsEl = document.getElementById('fps');
 addEventListener('keydown', e => {
   if (e.code === 'F3') { e.preventDefault(); debugOn = !debugOn; }
 });
@@ -2210,7 +2311,16 @@ function updateDebug(dt) {
   el.style.display = debugOn ? 'block' : 'none';
   if (!debugOn) return;
   fpsAcc += dt; fpsFrames++;
-  if (fpsAcc > 0.4) { fpsShown = Math.round(fpsFrames / fpsAcc); fpsAcc = 0; fpsFrames = 0; }
+  if (fpsAcc > 0.4) {
+    fpsShown = Math.round(fpsFrames / fpsAcc);
+    fpsAcc = 0; fpsFrames = 0;
+    /* نمایش FPS در گوشه — همیشه، نه فقط با F3.
+       رنگ: سبز ≥ ۵۵، زرد ≥ ۴۰، قرمز کمتر. برای تشخیص افت فریم. */
+    if (fpsEl) {
+      fpsEl.textContent = `${fpsShown} FPS`;
+      fpsEl.style.color = fpsShown >= 55 ? '#3ddc63' : fpsShown >= 40 ? '#ffb020' : '#ff3b30';
+    }
+  }
   const alive = actors.filter(a => a.alive).length;
   const keysDown = Object.keys(keys).filter(k => keys[k]).join(',') || '—';
   el.textContent =
@@ -2222,6 +2332,8 @@ function updateDebug(dt) {
     `camZoom: ${camZoom.toFixed(0)}  |  محدوده نقشه: ±${HW.toFixed(0)}x±${HH.toFixed(0)}\n` +
     `زاویه دوربین: ${(Math.atan2(camera.position.y - camTarget0.y, Math.hypot(camera.position.x - camTarget0.x, camera.position.z - camTarget0.z)) * 180 / Math.PI).toFixed(0)}°\n` +
     `کلیدها: ${keysDown}\n` +
+    `نورهای روشن: ${lightSources.length + 1}  |  draw call: ${renderer.info?.render?.calls ?? '—'}\n` +
+    `مثلث: ${(renderer.info?.render?.triangles ?? 0).toLocaleString('en-US')}\n` +
     `بازیگران زنده: ${alive}  |  خشاب: ${player.mag}\n` +
     `مه: ${scene.fog ? scene.fog.density : 'خاموش'}  |  نقاط نور: ${lightsInScene()}\n` +
     `روشنایی محیط: ${ambientLight.intensity.toFixed(2)}  بالاسری: ${overhead.intensity.toFixed(2)}\n` +
@@ -2357,7 +2469,7 @@ function animate() {
   /* نشانه‌گر را زیر پای بازیکن می‌گذاریم (جهت +Z = پایین صفحه چون
      camera.up = (0,0,-1)). این‌طور کاراکتر هرگز زیر نشانه‌گر پنهان نمی‌شود
      و در نمای عمود «جلو» همان جایی است که نور می‌تابد. */
-  crossEl.style.top = '58%';
+  if (!crossSet) { crossEl.style.top = '58%'; crossSet = true; }
   recoil = Math.max(0, recoil - dt * 3);
 
   /* ریکویل زاویه‌ای: فنر ساده — سرعت به سمت صفر، زاویه به سمت صفر برمی‌گردد.
@@ -2370,6 +2482,12 @@ function animate() {
 
   updateEffects(dt);
   for (const m of mixers) m.update(dt);
+  /* ⚠️ BUG (لرزش اسلحه): اسلحه باید *پس از* آپدیت اسکلت جای‌گذاری شود،
+     ولی قبل از رندر. کد قبلی درست بود؛ مشکل جای دیگری بود: `updateMatrixWorld`
+     دست قبل از آپدیت میکسر صدا زده می‌شد و موقعیت یک فریم عقب می‌ماند.
+     حالا اول اسکلت آپدیت می‌شود، بعد world matrix، بعد اسلحه. */
+  for (const a of actors) a.model?.updateMatrixWorld(true);
+  playerModel?.updateMatrixWorld(true);
   for (const h of gunHolders) layoutGun(h, dt);
 
   // ---- چراغ‌قوه‌ها ----
@@ -2387,7 +2505,15 @@ function animate() {
   wLight.halo.intensity += ((lightState.on ? 2.2 : 0) - wLight.halo.intensity) * Math.min(1, dt * 12);
   selfGlow.visible = lightState.on;
 
-  // چراغ‌قوه ai: سوات‌ها روشن، تروریست‌ها گاهی روشن می‌شوند
+  /* ---------------- چراغ‌قوه‌های AI با بودجه‌ی نور ----------------
+     ⚠️ PERFORMANCE: قبلاً هر ۹ بات می‌توانستند هم‌زمان چراغ روشن داشته
+     باشند. هر SpotLight اضافه = یک پاس نور در شیدر برای *همه‌ی* مش‌ها.
+     روی کارت ضعیف این تنها علت افت فریم بود.
+     حالا سخت‌افزار «بودجه» دارد: حداکثر ۳ چراغ AI، اولویت به نزدیک‌ترین
+     به بازیکن. بقیه خاموش‌اند ولی در سیستم دید «روشن» حساب می‌شوند
+     (چون نورشان شبیه‌سازی است، نه واقعی). */
+  const MAX_AI_LIGHTS = 3;
+  const lightCandidates = [];
   for (const a of actors) {
     if (a.isPlayer || !a.aiSpot) continue;
     if (a.lightOn === undefined) a.lightOn = a.team === 'swat';
@@ -2398,14 +2524,23 @@ function animate() {
         if (a.lightTimer <= 0) a.lightOn = false;
       }
     }
-    a.aiSpot.intensity += ((a.lightOn && a.alive ? 4.2 : 0) - a.aiSpot.intensity) * Math.min(1, dt * 8);
+    if (a.lightOn && a.alive) lightCandidates.push({ a, d: flatDist(a.g.position, playerG.position) });
+  }
+  // نزدیک‌ترین‌ها نور واقعی می‌گیرند، دورترها نمی‌گیرند
+  lightCandidates.sort((x, y) => x.d - y.d);
+  const budget = new Set(lightCandidates.slice(0, MAX_AI_LIGHTS).map(c => c.a));
+  for (const a of actors) {
+    if (a.isPlayer || !a.aiSpot) continue;
+    const wantIntensity = budget.has(a) ? 4.2 : 0;
+    a.aiSpot.intensity += (wantIntensity - a.aiSpot.intensity) * Math.min(1, dt * 8);
   }
   updateTagVisibility(t);
 
   // شارژ آرام زره
   if (player.alive && player.armor < player.maxArmor) player.armor = Math.min(player.maxArmor, player.armor + dt * 3);
 
-  drawMinimap();
+  mmAcc += dt;
+  if (mmAcc > 1 / 20) { mmAcc = 0; drawMinimap(); }   // ۲۰ fps کافی است، نه ۶۰
   updateDebug(dt);
   renderer.render(scene, camera);
 }
