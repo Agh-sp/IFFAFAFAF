@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { addReadableKit } from './kit.js';
+import { canSee, viewRangeOf, LIGHT, CONE } from './vision.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import {
   TILE, COLS, ROWS, HW, HH, GRID, FLOOR, WALL, WORLD_W, WORLD_D,
@@ -82,7 +83,7 @@ renderer.shadowMap.enabled = false;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.25;
+renderer.toneMappingExposure = 1.05;
 container.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -109,10 +110,10 @@ camera.position.set(0, 26, 16);
    قانون نور ۱: حتی در تاریکی مطلق، کفِ زیر پای بازیکن باید حداقل
    ۳٪ روشنایی داشته باشد (تله‌ی «سیاه مطلق» ممنوع).
    قبلاً این عدد ۲.۱ بود که نقشه را «کم‌نور» می‌کرد، نه «تاریک». */
-const ambientLight = new THREE.AmbientLight(0x8fa6c0, 0.34);
+const ambientLight = new THREE.AmbientLight(0x8fa6c0, 0.055);
 scene.add(ambientLight);
 // نور عمودی خیلی کم از بالا: بدون این، سطوح افقی کاملاً تخت و سیاه می‌شوند
-const overhead = new THREE.DirectionalLight(0xc8dcf6, 0.42);
+const overhead = new THREE.DirectionalLight(0xc8dcf6, 0.10);
 overhead.position.set(8, 40, 12);
 scene.add(overhead);
 
@@ -667,7 +668,7 @@ wLight.spot.intensity = 0;
 wLight.target.position.set(0, 0, 16);
 
 // یک نور ضعیف و خیلی نزدیک به خود بازیکن تا در تاریکی مطلق گم نشود
-const selfGlow = new THREE.PointLight(0xb8d2f5, 7, 8.5, 1.4);
+const selfGlow = new THREE.PointLight(0xb8d2f5, 3.2, 6.5, 1.6);
 selfGlow.position.set(0, 1.1, 0);
 playerG.add(selfGlow);
 
@@ -737,6 +738,32 @@ function toggleFlashlight() {
   toast(lightState.on ? '🔦 چراغ‌قوه روشن' : '🔦 چراغ‌قوه خاموش — تاریک شد');
 }
 
+/* ---------------- منابع نور (برای سیستم دید) ----------------
+   هر فریم یک بار ساخته می‌شود و هم برای AI و هم برای مینی‌مپ استفاده
+   می‌شود. اگر چراغ‌قوه خاموش باشد، منبع اصلاً اضافه نمی‌شود.
+   ⚠️ هزینه: چند آرایه‌ی کوچک، بدون raycast — ارزان است. */
+const lightSources = [];
+function rebuildLightSources() {
+  lightSources.length = 0;
+  // بازیکن
+  if (player.alive && lightState.on) {
+    lightSources.push({
+      org: { x: playerG.position.x, z: playerG.position.z },
+      dir: { x: Math.sin(aimAngle), z: Math.cos(aimAngle) },
+      cfg: CONE.player, on: true, owner: playerActor,
+    });
+  }
+  // همه‌ی AI ها با چراغ روشن
+  for (const a of actors) {
+    if (!a.alive || a.isPlayer || a.aiSpot?.intensity < 0.5) continue;
+    lightSources.push({
+      org: { x: a.g.position.x, z: a.g.position.z },
+      dir: { x: Math.sin(a.g.rotation.y), z: Math.cos(a.g.rotation.y) },
+      cfg: CONE.ai, on: true, owner: a,
+    });
+  }
+}
+
 // آیا نقطه‌ی p داخل مخروط نور چراغ‌قوه‌ی صاحبش است؟
 function inCone(owner, p, halfAngle, range) {
   const g = owner.g;
@@ -754,6 +781,29 @@ function litByPlayer(p) {
 // آیا کاراکتر ai (که چراغ‌قوه‌اش روشن است) نقطه‌ی p را می‌بیند؟
 function litByAi(a, p) {
   return a.alive && inCone(a, p, 0.30, 16);
+}
+
+/* مقدار نور در نقطه‌ی p از نگاه یک ناظر (بدون نور خودِ ناظر).
+   برای AI استفاده می‌شود: آیا هدف روشن است؟ */
+function levelAround(owner, p) {
+  let v = LIGHT.ambient;
+  for (const s of lightSources) {
+    if (s.owner === owner) continue;   // نور خودش را نادیده بگیر (دیدن خود در آینه)
+    v += coneIntensityCached(s, p);
+  }
+  return v;
+}
+function coneIntensityCached(s, p) {
+  const dx = p.x - s.org.x, dz = p.z - s.org.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist > s.cfg.range) return 0;
+  if (dist < 0.001) return s.cfg.intensity;
+  const cos = (dx * s.dir.x + dz * s.dir.z) / dist;
+  const ang = Math.acos(Math.max(-1, Math.min(1, cos)));
+  if (ang > s.cfg.angle) return 0;
+  const t = dist / s.cfg.range, q = ang / s.cfg.angle;
+  const ss = (e0, e1, x) => { const u = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return u * u * (3 - 2 * u); };
+  return s.cfg.intensity * ss(0, 0.12, t) * (1 - ss(0.7, 1, t)) * (1 - ss(0.45, 1, q));
 }
 
 /* رنگ‌آمیزی تیم:
@@ -1095,6 +1145,52 @@ function spawnTracer(from, to, team, width = 0.06) {
   popLight(from, 14, 0.08);
 }
 
+/* ---------------- فلاش دهانه (GDD v2 بخش ۴.۱) ----------------
+   دو لایه: نور نقطه‌ای کوتاه + یک پلن رو به بالا که چند فریم می‌ماند.
+   بدون این، شلیک فقط صدا و یک خط نازک است — «فیک» حس می‌شود. */
+const flashTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.35, 'rgba(255,225,150,0.8)');
+  grd.addColorStop(1, 'rgba(255,180,80,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+const muzzleGeo = new THREE.PlaneGeometry(0.34, 0.34);
+function muzzleFlash(pos, kind) {
+  const heavy = kind === 'shotgun' || kind === 'sniper';
+  // ۱) نور
+  popLight(pos, heavy ? 30 : 16, 0.055);
+  // ۲) پلن روشن (ستاره‌ی چهارپر ساده با یک بافت canvas)
+  const m = new THREE.Mesh(muzzleGeo, new THREE.MeshBasicMaterial({
+    map: flashTex, color: 0xffe3a8, transparent: true, opacity: 0.95,
+    depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  }));
+  m.position.copy(pos); m.position.y = 1.25;
+  m.rotation.x = -Math.PI / 2;              // خوابیده، رو به دوربین عمود
+  m.rotation.z = Math.random() * Math.PI * 2;
+  m.scale.setScalar(heavy ? 1.6 : 1);
+  m.userData.baseScale = heavy ? 1.6 : 1;
+  m.renderOrder = 5;
+  scene.add(m);
+  effects.push({ mesh: m, t: 0, life: 0.06, kind: 'flash' });
+  // ۳) دود دهانه (۲ ذره)
+  for (let i = 0; i < (heavy ? 4 : 2); i++) {
+    const sm = new THREE.Mesh(new THREE.CircleGeometry(0.12, 6), new THREE.MeshBasicMaterial({
+      color: 0x9aa6b4, transparent: true, opacity: 0.22, depthWrite: false,
+    }));
+    sm.position.copy(pos); sm.position.y = 1.2;
+    sm.rotation.x = -Math.PI / 2;
+    scene.add(sm);
+    const ang = Math.random() * 6.28, sp = 0.6 + Math.random() * 1.2;
+    effects.push({ mesh: sm, t: 0, life: 0.35, kind: 'smoke', vx: Math.sin(ang) * sp, vz: Math.cos(ang) * sp });
+  }
+}
+
 const effects = [];
 function spawnSpark(pos) {
   const m = new THREE.Mesh(new THREE.SphereGeometry(0.1, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffe2b0 }));
@@ -1153,10 +1249,14 @@ function playerShoot() {
   }
 
   const pellets = w.pellets || 1;
-  const spread = w.spread * (joyMoving ? 1.8 : 1) * smokePenalty;
+  /* پراکندگی پویا: هر گلوله کمی بیشتر پخش می‌کند، با توقف کم می‌شود.
+     این تنها چیزی است که «شلیک مداوم» را از «تک‌تیر» متفاوت می‌کند. */
+  const spread = w.spread * (joyMoving ? 1.8 : 1) * smokePenalty * (1 + spreadHeat.v);
+  // ریکویل زاویه‌ای: گلوله کمی بالاتر از مرکز می‌رود (قابل جبران با ماوس)
+  const shotAngle = aimAngle + aimKick.angle;
   let anyHit = false;
   for (let i = 0; i < pellets; i++) {
-    const ang = aimAngle + rand(-spread, spread);
+    const ang = shotAngle + rand(-spread, spread);
     const dir = new THREE.Vector3(Math.sin(ang), 0, Math.cos(ang));
     const hit = raycastShot(origin, dir, w.range, 'swat');
     spawnTracer(origin, hit.point, 'swat', w.kind === 'shotgun' ? 0.05 : w.kind === 'pistol' ? 0.07 : 0.06);
@@ -1169,10 +1269,10 @@ function playerShoot() {
   }
   if (anyHit) hitmarker();
   if (w.kind !== 'melee') playShot(w.kind, 0, 1);
-  popLight(origin.clone().addScaledVector(fwd, 0.7), w.kind === 'shotgun' ? 26 : 14, 0.08);
-  recoil = w.kind === 'shotgun' ? 1.4 : 0.55;
+  // فلاش دهانه: نور + پلن روشن (دو لایه)
+  muzzleFlash(origin.clone().addScaledVector(fwd, 0.6), w.kind);
+  applyRecoil(w.kind);
   if (w.scope) startReload(true);
-  if (w.kind === 'shotgun') shake = Math.max(shake, 0.12);
 }
 
 // کمان ضربه چاقو
@@ -1208,22 +1308,114 @@ function startReload(quick = false) {
    مانع خورد، کمی کنار می‌زند. همین ساده بودن باعث می‌شود هیچ‌وقت
    «دور خودش نچرخد».
 */
+/* ---------------- گشت (patrol) ----------------
+   AI بین نقاط علاقه می‌چرخد. نقاط ثابت و طراحی‌شده‌اند، نه تصادفی:
+   مرکز نقشه و دو طرف تیم مقابل. این هم بازی را زنده می‌کند، هم
+   «ربات ایستاده» را از بین می‌برد.
+   حرکت با همان مدل شتاب/اصطکاک انجام می‌شود تا انسانی باشد. */
+const PATROL_POINTS = [
+  { x: 0, z: 0 }, { x: -12, z: -8 }, { x: 12, z: 8 },
+  { x: -18, z: 10 }, { x: 18, z: -10 }, { x: 0, z: -14 }, { x: 0, z: 14 },
+];
+function pickPatrolGoal(a) {
+  // دورترین نقطه از جای فعلی + کمی تصادفی ⇒ مسیرها تکرار نمی‌شوند
+  let best = null, bestScore = -Infinity;
+  for (const p of PATROL_POINTS) {
+    const d = flatDist(a.g.position, p);
+    const score = d * (0.7 + Math.random() * 0.6);
+    if (score > bestScore && d > 6) { bestScore = score; best = p; }
+  }
+  a.patrolGoal = best ? { ...best } : { x: rand(-20, 20), z: rand(-14, 14) };
+  a.patrolWait = rand(0.3, 1.2);   // کمی مکث قبل از راه افتادن
+}
+
+function patrol(a, dt) {
+  if (!a.vel) a.vel = { x: 0, z: 0 };
+  if (!a.patrolGoal) pickPatrolGoal(a);
+  a.patrolWait = Math.max(0, (a.patrolWait || 0) - dt);
+
+  const gx = a.patrolGoal.x, gz = a.patrolGoal.z;
+  const d = Math.hypot(gx - a.g.position.x, gz - a.g.position.z);
+  if (d < 2.0) { pickPatrolGoal(a); return; }
+
+  let vx = 0, vz = 0;
+  if (a.patrolWait <= 0) {
+    const ang = Math.atan2(gx - a.g.position.x, gz - a.g.position.z);
+    // گشت با سرعت کمتر از تعقیب: ۲.۶ m/s (راه رفتن با احتیاط، اسلحه بالا)
+    vx = Math.sin(ang) * 2.6;
+    vz = Math.cos(ang) * 2.6;
+    // چرخش نرم به سمت مسیر
+    const want = ang;
+    let diff = want - a.g.rotation.y;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    a.g.rotation.y += clamp(diff, -4.5 * dt, 4.5 * dt);
+  }
+
+  const k = 1 - Math.exp(-6 * dt);
+  a.vel.x += (vx - a.vel.x) * k;
+  a.vel.z += (vz - a.vel.z) * k;
+  a.g.position.x = clamp(a.g.position.x + a.vel.x * dt, -HW + 2, HW - 2);
+  a.g.position.z = clamp(a.g.position.z + a.vel.z * dt, -HH + 2, HH - 2);
+
+  // A13/A14: انیمیشن فقط با حرکت واقعی، و با سرعت هم‌تراز
+  const spd = Math.hypot(a.vel.x, a.vel.z);
+  playAnim(a.model, spd > 0.4 ? ['Walk', 'Run_Shoot'] : ['Idle_Gun_Pointing', 'Idle_Gun'], 0.22);
+  if (a.model?.userData?.mixer) {
+    a.model.userData.mixer.timeScale = spd > 0.4 ? clamp(spd / 2.6, 0.8, 1.2) : 1;
+  }
+}
+
 function updateAI(a, dt) {
   if (!a.alive) return;
   a.fireCd -= dt;
   if (a.repath === undefined) a.repath = 0;
   a.repath -= dt;
 
-  // نزدیک‌ترین دشمن
+  /* ---------- انتخاب هدف: فقط چیزی که «دیده می‌شود» ----------
+     ⚠️ باگ قبلی: `flatDist` تنها معیار بود، پس AI در تاریکی مطلق هم
+     بازیکن را می‌دید و شلیک می‌کرد. حالا سه شرط لازم است:
+       ۱) داخل برد دید (که خودش به چراغ‌قوه‌ی همین AI وابسته است)
+       ۲) خط دید آزاد (دیواری در میان نباشد)
+       ۳) هدف روشن باشد (نور خودش، نور دیگری، یا چراغ اضطراری)
+     استثنا: فاصله‌ی زیر ۲.۵ متر (حس نزدیک/صدا). */
+  a.viewRange = viewRangeOf(a.lightOn, 16);
   let target = null, bestD = Infinity;
   for (const e of actors) {
     if (!e.alive || e.team === a.team) continue;
     const d = flatDist(a.g.position, e.g.position);
-    if (d < bestD) { bestD = d; target = e; }
+    if (d >= bestD) continue;
+    if (d > a.viewRange) continue;                                  // ۱) برد
+    if (d > LIGHT.touchRange) {
+      if (!hasLineOfSight(a.g.position, e.g.position)) continue;    // ۲) دیوار
+      if (levelAround(a, e.g.position) < LIGHT.visible) continue;   // ۳) نور
+    }
+    bestD = d; target = e;
   }
+
+  /* حافظه‌ی کوتاه: اگر هدف را برای ۱.۵ ثانیه گم کرد، رهایش کن.
+     بدون این، AI با یک بار دیدن تا آخر راند تعقیب می‌کرد. */
+  if (target) {
+    a.memoryTarget = target;
+    a.memoryPos = { x: target.g.position.x, z: target.g.position.z };
+    a.memoryTimer = 1.5;
+    a.aware = (a.aware || 0) + dt;
+  } else if (a.memoryTimer > 0) {
+    a.memoryTimer -= dt;
+    a.aware = Math.max(0, (a.aware || 0) - dt * 2);
+  } else {
+    a.aware = 0;
+    a.memoryTarget = null;
+  }
+
   a.target = target;
-  if (!target) {
-    playAnim(a.model, ['idle'], 0.2);
+  if (!target && !a.memoryTarget) {
+    /* ⚠️ باگ واقعی: AI بدون هدف کاملاً می‌ایستاد. روی نقشه‌ی خالی که
+       تیم‌ها ۴۴ متر از هم‌اند، هیچ‌کس هیچ‌وقت هم‌دیگر را نمی‌دید و
+       همه‌ی بات‌ها تا آخر راند یخ می‌زدند.
+       حالا گشت می‌زنند: بین نقاط علاقه (نقاط بمب، راهروها، مرکز نقشه)
+       جابه‌جا می‌شوند — با همان مدل حرکتِ شتاب‌دار. */
+    patrol(a, dt);
     return;
   }
 
@@ -1233,38 +1425,66 @@ function updateAI(a, dt) {
   // رو به هدف
   a.g.rotation.y = Math.atan2(tx - a.g.position.x, tz - a.g.position.z) + MODEL_YAW_OFFSET;
 
-  let moving = false;
-  if (bestD > want) {
-    // جلو رفتن
-    const ang = Math.atan2(tx - a.g.position.x, tz - a.g.position.z);
-    const step = a.speed * dt;
-    a.g.position.x += Math.sin(ang) * step;
-    a.g.position.z += Math.cos(ang) * step;
-    moving = true;
-  } else if (bestD < want * 0.5) {
-    // عقب کشیدن
-    const ang = Math.atan2(a.g.position.x - tx, a.g.position.z - tz);
-    const step = a.speed * 0.7 * dt;
-    a.g.position.x += Math.sin(ang) * step;
-    a.g.position.z += Math.cos(ang) * step;
-    moving = true;
+  /* ---------- حرکت با شتاب و اصطکاک ----------
+     ⚠️ باگ قبلی: `pos += dir * speed * dt` یعنی سرعت ثابت، شتاب صفر،
+     توقف فوری. نتیجه: کاراکتری که می‌لغزد. حالا مثل یک آدم:
+       سرعت هدف تعیین می‌شود، سرعت فعلی به سمتش می‌رود، موقعیت از
+       سرعت فعلی ساخته می‌شود. و قبل از شلیک، ۰.۲ ثانیه توقف می‌کند. */
+  if (!a.vel) a.vel = { x: 0, z: 0 };
+  let vTargetX = 0, vTargetZ = 0;
+
+  // اگر آماده‌ی شلیک است، سرعتش را کم می‌کند (توقف انسانی، نه فوری)
+  const wantsToShoot = target && bestD < a.range && (a.aware || 0) >= 0.4;
+
+  if (!wantsToShoot) {
+    if (bestD > want) {
+      const ang = Math.atan2(tx - a.g.position.x, tz - a.g.position.z);
+      vTargetX = Math.sin(ang) * a.speed;
+      vTargetZ = Math.cos(ang) * a.speed;
+    } else if (bestD < want * 0.5) {
+      const ang = Math.atan2(a.g.position.x - tx, a.g.position.z - tz);
+      vTargetX = Math.sin(ang) * a.speed * 0.7;
+      vTargetZ = Math.cos(ang) * a.speed * 0.7;
+    }
   }
+
+  // k=6 برای شتاب گرفتن، k=10 برای ایستادن (توقف سریع‌تر از شروع)
+  const accelK = (vTargetX || vTargetZ) ? 6 : 10;
+  const k = 1 - Math.exp(-accelK * dt);
+  a.vel.x += (vTargetX - a.vel.x) * k;
+  a.vel.z += (vTargetZ - a.vel.z) * k;
+
+  const spd = Math.hypot(a.vel.x, a.vel.z);
+  if (spd > 0.02) {
+    a.g.position.x += a.vel.x * dt;
+    a.g.position.z += a.vel.z * dt;
+  }
+  const moving = spd > 0.4;
 
   // داخل زمین بماند
   a.g.position.x = clamp(a.g.position.x, -HW + 2, HW - 2);
   a.g.position.z = clamp(a.g.position.z, -HH + 2, HH - 2);
 
   playAnim(a.model, moving ? ['Run_Shoot', 'Run'] : ['Idle_Gun_Pointing', 'Idle_Gun'], 0.16);
+  // A14: قدم‌ها با زمین سُر نمی‌خورند — سرعت انیمیشن با سرعت حرکت
+  if (a.model?.userData?.mixer && moving) {
+    a.model.userData.mixer.timeScale = Math.min(1.3, Math.max(0.7, spd / 4.5));
+  }
 
-  // شلیک
-  if (bestD < a.range && a.fireCd <= 0) {
+  /* ---------- شلیک: با تأخیر واکنش انسانی ----------
+     AI بلافاصله شلیک نمی‌کند. اول باید ۰.۴ ثانیه هدف را ببیند
+     (چرخش + بالا آوردن اسلحه). این تنها تفاوت بین «ربات» و «بازیکن» است. */
+  const REACTION = 0.4;
+  if (target && bestD < a.range && a.fireCd <= 0 && (a.aware || 0) >= REACTION) {
     a.fireCd = a.fireRate * rand(0.8, 1.3);
     const origin = a.g.position.clone();
     origin.x += Math.sin(a.g.rotation.y - MODEL_YAW_OFFSET) * 0.55;
     origin.z += Math.cos(a.g.rotation.y - MODEL_YAW_OFFSET) * 0.55;
     origin.y = 1.2;
     const tgt = new THREE.Vector3(tx, 1.15, tz);
-    let hitChance = clamp(1.1 - bestD / (a.range * 1.6), 0.2, 0.85);
+    // دقت با زمان دیدن بالا می‌رود: شلیک اول ۶۰٪، بعد ۸۵٪
+    const settle = Math.min(1, (a.aware || 0) / 1.6);
+    let hitChance = clamp(1.1 - bestD / (a.range * 1.6), 0.2, 0.85) * (0.6 + 0.4 * settle);
     if (inSmoke(a.g.position) || inSmoke(tgt)) hitChance *= 0.45;
     const miss = tgt.clone().add(new THREE.Vector3(rand(-2.4, 2.4), rand(-0.4, 1.4), rand(-2.4, 2.4)));
     spawnTracer(origin, Math.random() < hitChance ? tgt : miss, a.team, 0.05);
@@ -1354,6 +1574,35 @@ const inSmoke = pos => smokes.some(s => flatDist(s.group.position, pos) < s.radi
 
 /* --------------------------- افکت‌ها --------------------------- */
 let shake = 0, recoil = 0;
+
+/* ---------------- ریکویل واقعی (GDD v2 بخش ۴) ----------------
+   ⚠️ باگ قبلی: `recoil` فقط یک عدد بود که هیچ‌جا اعمال نمی‌شد؛
+   شلیک هیچ بازخوردی روی نشانه‌گیری نداشت و «فیک» حس می‌شد.
+   حالا ریکویل سه اثر دارد:
+     ۱) AIM_KICK: زاویه‌ی نشانه‌گیری کمی به بالا/تصادفی می‌رود
+     ۲) CAM_KICK: دوربین کمی عقب و بالا می‌رود
+     ۳) هر دو با ease-out برمی‌گردند (قابل جبران با ماوس) */
+const aimKick = { angle: 0, vel: 0 };     // رادیان
+let camKick = 0;                           // متر
+const RECOIL = {
+  shotgun: { aim: 0.055, cam: 0.060, shake: 0.12, spreadGrow: 1.9 },
+  rifle:   { aim: 0.020, cam: 0.022, shake: 0.030, spreadGrow: 1.45 },
+  smg:     { aim: 0.015, cam: 0.016, shake: 0.022, spreadGrow: 1.55 },
+  pistol:  { aim: 0.032, cam: 0.032, shake: 0.045, spreadGrow: 1.35 },
+  sniper:  { aim: 0.075, cam: 0.075, shake: 0.10, spreadGrow: 1.15 },
+  melee:   { aim: 0, cam: 0, shake: 0, spreadGrow: 1 },
+};
+// پراکندگی پویا: با هر گلوله بزرگ‌تر، با توقف کوچک‌تر
+const spreadHeat = { v: 0 };
+
+function applyRecoil(kind) {
+  const r = RECOIL[kind] || RECOIL.rifle;
+  // جهت ریکویل: همیشه کمی تصادفی، نه همیشه یک‌سان
+  aimKick.vel += r.aim * (Math.random() < 0.5 ? 1 : 1) * (0.8 + Math.random() * 0.4);
+  camKick = Math.min(0.12, camKick + r.cam);
+  shake = Math.max(shake, r.shake);
+  spreadHeat.v = Math.min(1, spreadHeat.v + 0.22 * (r.spreadGrow - 1) * 2.2);
+}
 function updateEffects(dt) {
   for (const f of [...effects]) {
     f.t += dt;
@@ -1363,6 +1612,18 @@ function updateEffects(dt) {
     } else if (f.kind === 'boom') {
       f.mesh.scale.setScalar(0.4 + k * f.radius * 1.05);
       f.mesh.material.opacity = 0.75 * (1 - k);
+    } else if (f.kind === 'flash') {
+      // فلاش دهانه: سریع بزرگ می‌شود و فوراً محو می‌شود
+      f.mesh.material.opacity = Math.max(0, 1 - k * k);
+      f.mesh.scale.setScalar((f.mesh.userData.baseScale || 1) * (1 + k * 0.9));
+      f.mesh.rotation.z += dt * 8;
+    } else if (f.kind === 'smoke') {
+      // دود دهانه: پخش می‌شود، بالا می‌رود، محو می‌شود
+      f.mesh.position.x += (f.vx || 0) * dt;
+      f.mesh.position.z += (f.vz || 0) * dt;
+      f.mesh.position.y += dt * 0.35;
+      f.mesh.material.opacity = 0.22 * (1 - k);
+      f.mesh.scale.setScalar(1 + k * 2.4);
     } else if (f.kind === 'debris') {
       f.vel.y -= 20 * dt;
       f.mesh.position.addScaledVector(f.vel, dt);
@@ -2046,6 +2307,7 @@ function animate() {
   if (player.alive && (mouseDown || joyFire)) playerShoot();
   updateHUD();
 
+  rebuildLightSources();   // منابع نور این فریم (برای سیستم دید)
   for (const a of actors) if (!a.isPlayer) updateAI(a, dt);
 
   // کالبد دشمن بعد از مرگ محو می‌شود
@@ -2082,6 +2344,14 @@ function animate() {
     shake = Math.max(0, shake - dt * 2.4);
   }
   camera.position.y = camZoom;
+  /* ریکویل دوربین: کمی عقب و بالا، با بازگشت نرم.
+     این «وزن» شلیک است — بدون آن، شلیک مثل کلیک موس حس می‌شود. */
+  if (camKick > 0.0001) {
+    camera.position.y += camKick * 0.45;
+    const back = new THREE.Vector3(camera.position.x - camTarget.x, 0, camera.position.z - camTarget.z);
+    if (back.lengthSq() > 0.0001) camera.position.addScaledVector(back.normalize(), camKick * 0.25);
+    camKick *= Math.exp(-dt * 9);          // بازگشت سریع، ولی نرم
+  }
   camera.lookAt(camTarget);
 
   /* نشانه‌گر را زیر پای بازیکن می‌گذاریم (جهت +Z = پایین صفحه چون
@@ -2089,6 +2359,14 @@ function animate() {
      و در نمای عمود «جلو» همان جایی است که نور می‌تابد. */
   crossEl.style.top = '58%';
   recoil = Math.max(0, recoil - dt * 3);
+
+  /* ریکویل زاویه‌ای: فنر ساده — سرعت به سمت صفر، زاویه به سمت صفر برمی‌گردد.
+     بازگشت نرم = بازیکن می‌تواند با ماوس جبران کند (کنترل، نه شانس). */
+  aimKick.vel += -aimKick.angle * 90 * dt;      // فنر
+  aimKick.vel *= Math.exp(-dt * 11);            // میرایی
+  aimKick.angle += aimKick.vel * dt;
+  // پراکندگی پویا: با توقف شلیک، در ۰.۵ ثانیه صفر می‌شود
+  spreadHeat.v = Math.max(0, spreadHeat.v - dt * (joyMoving ? 1.4 : 2.6));
 
   updateEffects(dt);
   for (const m of mixers) m.update(dt);

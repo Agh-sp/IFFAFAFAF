@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/test-boot.mjs && node scripts/test-engine.mjs && node scripts/test-anim.mjs && node scripts/test-movement.mjs && node scripts/test-ai.mjs && node scripts/test-tdz.mjs && node scripts/test-integration.mjs && node scripts/check-assets.mjs",
+    "test": "node scripts/test-boot.mjs && node scripts/test-vision.mjs && node scripts/test-engine.mjs && node scripts/test-anim.mjs && node scripts/test-movement.mjs && node scripts/test-ai.mjs && node scripts/test-tdz.mjs && node scripts/test-integration.mjs && node scripts/check-assets.mjs",
     "preview3d": "node scripts/render-scene.mjs"
   },
   "repository": {

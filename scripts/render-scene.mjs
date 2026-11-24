@@ -84,7 +84,7 @@ playerG.add(root);
 if (gunReady) gunHolder.position.copy(root.worldToLocal(gunHolder.position.clone())), playerG.add(gunHolder);
 playerG.updateMatrixWorld(true);
 // ---- تجهیزات خوانا: از همان ماژول بازی
-addReadableKit(root, 'swat');
+addReadableKit(root, process.env.TEAM || 'swat');
 playerG.updateMatrixWorld(true);
 
 if (gunMeshes.length) {
